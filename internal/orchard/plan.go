@@ -3,6 +3,7 @@ package orchard
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -225,10 +226,9 @@ func actionRequiresLinux(action string) bool {
 
 func (p Planner) fingerprint(ctx context.Context, project string, input PlanInput, tools []string) (string, error) {
 	h := sha256.New()
-	_, _ = io.WriteString(h, "orchard-plan-v2\x00")
+	writeFingerprintRecord(h, "schema", []byte("orchard-plan-v3"))
 	encodedInput, _ := json.Marshal(input)
-	_, _ = h.Write(encodedInput)
-	_, _ = io.WriteString(h, "\x00")
+	writeFingerprintRecord(h, "input", encodedInput)
 	var projectBytes int64
 	selectedIPA := ""
 	if input.IPA != "" {
@@ -240,20 +240,23 @@ func (p Planner) fingerprint(ctx context.Context, project string, input PlanInpu
 		if selectedIPA != "" && filepath.Clean(relative) == selectedIPA {
 			return nil
 		}
-		_, _ = io.WriteString(h, filepath.ToSlash(relative)+"\x00")
-		return hashBounded(ctx, h, file, maxFingerprintFileBytes, &projectBytes, maxFingerprintTotalBytes)
+		digest, size, err := digestBounded(ctx, file, maxFingerprintFileBytes, &projectBytes, maxFingerprintTotalBytes)
+		if err != nil {
+			return err
+		}
+		writeFingerprintRecord(h, "project-file", []byte(filepath.ToSlash(relative)), encodeFingerprintSize(size), digest)
+		return nil
 	})
 	if err != nil {
 		return "", err
 	}
 	if input.IPA != "" {
-		_, _ = io.WriteString(h, "ipa\x00"+input.IPA+"\x00")
 		ipa, openErr := openRegularWithin(p.Workspace, input.IPA, os.O_RDONLY, 0)
 		if openErr != nil {
 			return "", openErr
 		}
 		var ipaBytes int64
-		copyErr := hashBounded(ctx, h, ipa, maxIPAFingerprintBytes, &ipaBytes, maxIPAFingerprintBytes)
+		digest, size, copyErr := digestBounded(ctx, ipa, maxIPAFingerprintBytes, &ipaBytes, maxIPAFingerprintBytes)
 		closeErr := ipa.Close()
 		if copyErr != nil {
 			return "", copyErr
@@ -261,6 +264,7 @@ func (p Planner) fingerprint(ctx context.Context, project string, input PlanInpu
 		if closeErr != nil {
 			return "", closeErr
 		}
+		writeFingerprintRecord(h, "ipa", []byte(input.IPA), encodeFingerprintSize(size), digest)
 	}
 	toolSet := map[string]bool{}
 	for _, id := range tools {
@@ -277,13 +281,12 @@ func (p Planner) fingerprint(ctx context.Context, project string, input PlanInpu
 		}
 		status := canonicalToolStatus(p.Tools.Probe(ctx, id))
 		encoded, _ := json.Marshal(status)
-		_, _ = h.Write(encoded)
+		writeFingerprintRecord(h, "tool-status", []byte(id), encoded)
 		if status.Path != "" {
 			file, openErr := openRegularAbsolute(status.Path)
 			if openErr == nil {
-				_, _ = io.WriteString(h, "\x00tool-bytes\x00")
 				var toolBytes int64
-				copyErr := hashBounded(ctx, h, file, maxToolFingerprintBytes, &toolBytes, maxToolFingerprintBytes)
+				digest, size, copyErr := digestBounded(ctx, file, maxToolFingerprintBytes, &toolBytes, maxToolFingerprintBytes)
 				closeErr := file.Close()
 				if copyErr != nil {
 					return "", fmt.Errorf("fingerprint %s executable: %w", id, copyErr)
@@ -291,12 +294,48 @@ func (p Planner) fingerprint(ctx context.Context, project string, input PlanInpu
 				if closeErr != nil {
 					return "", closeErr
 				}
+				writeFingerprintRecord(h, "tool-file", []byte(id), []byte(status.Path), encodeFingerprintSize(size), digest)
 			} else if _, statErr := os.Lstat(status.Path); statErr == nil {
 				return "", fmt.Errorf("fingerprint %s executable: %w", id, openErr)
 			}
 		}
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// writeFingerprintRecord gives every record and field an explicit length. This
+// prevents a path/content boundary in one project shape from being interpreted
+// as a different sequence of files with the same fingerprint input stream.
+func writeFingerprintRecord(destination io.Writer, kind string, fields ...[]byte) {
+	writeFingerprintField(destination, []byte(kind))
+	var count [8]byte
+	binary.BigEndian.PutUint64(count[:], uint64(len(fields)))
+	_, _ = destination.Write(count[:])
+	for _, field := range fields {
+		writeFingerprintField(destination, field)
+	}
+}
+
+func writeFingerprintField(destination io.Writer, value []byte) {
+	var size [8]byte
+	binary.BigEndian.PutUint64(size[:], uint64(len(value)))
+	_, _ = destination.Write(size[:])
+	_, _ = destination.Write(value)
+}
+
+func encodeFingerprintSize(value int64) []byte {
+	var encoded [8]byte
+	binary.BigEndian.PutUint64(encoded[:], uint64(value))
+	return encoded[:]
+}
+
+func digestBounded(ctx context.Context, source *os.File, perFileLimit int64, total *int64, totalLimit int64) ([]byte, int64, error) {
+	before := *total
+	digest := sha256.New()
+	if err := hashBounded(ctx, digest, source, perFileLimit, total, totalLimit); err != nil {
+		return nil, 0, err
+	}
+	return digest.Sum(nil), *total - before, nil
 }
 
 func canonicalToolStatus(status ToolStatus) ToolStatus {

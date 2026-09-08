@@ -111,12 +111,14 @@ atomically by its first run attempt, successful or failed; an explicit planning
 request is required before another attempt.
 
 Fingerprints stream regular files through no-follow, workspace-confined opens.
-They bind a selected IPA even when it is below skipped build-state directories,
-and bind planned executable bytes when the executable is an accessible regular
-file. Source inputs are limited to 64 MiB each and 512 MiB total, selected IPAs
-to 8 GiB, and tool executables to 256 MiB. This content binding detects local
-replacement between planning attempts; checksum verification for Orchard-managed
-tool installation remains the bootstrap layer's responsibility.
+Each path, byte count, and per-file SHA-256 is length-framed before it enters the
+plan fingerprint. They bind a selected IPA even when it is below skipped
+build-state directories, and bind planned executable bytes when the executable
+is an accessible regular file. Source inputs are limited to 64 MiB each and 512
+MiB total, selected IPAs to 8 GiB, and tool executables to 256 MiB. This content
+binding detects local replacement between planning attempts; checksum
+verification for Orchard-managed tool installation remains the bootstrap
+layer's responsibility.
 
 | Action | Effect | Command boundary |
 | --- | --- | --- |

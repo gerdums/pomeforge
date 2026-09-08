@@ -317,6 +317,9 @@ func scanHistory(reader io.Reader, limit int) ([]OperationResult, error) {
 	for scanner.Scan() {
 		var result OperationResult
 		if json.Unmarshal(scanner.Bytes(), &result) == nil {
+			// History may have been written by an older Orchard redactor. Apply
+			// the current policy again before exposing retained output to callers.
+			result.Output = redactOutput(result.Output)
 			results = append(results, result)
 			if len(results) > limit {
 				results = results[1:]

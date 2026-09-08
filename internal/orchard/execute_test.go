@@ -2,6 +2,7 @@ package orchard
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -331,5 +332,44 @@ func TestHistoryStreamingLimitRejectsGrowthBeyondInitialSize(t *testing.T) {
 	reader := strings.NewReader(strings.Repeat(line, maxHistoryBytes/len(line)+2))
 	if _, err := scanHistory(reader, 10); err == nil || !strings.Contains(err.Error(), "read limit") {
 		t.Fatalf("streaming history limit was not enforced: %v", err)
+	}
+}
+
+func TestLoadHistoryRedactsLegacyOutput(t *testing.T) {
+	project := t.TempDir()
+	directory := filepath.Join(project, ".orchard")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	credential := "synthetic-legacy-environment-canary"
+	t.Setenv("ASC_PRIVATE_KEY", credential)
+	legacy := OperationResult{
+		ID: "legacy", Action: "upload", Status: "failed", ExitCode: 7,
+		Output: "-----BEGIN PRIVATE KEY-----\nsynthetic-legacy-pem\n-----END PRIVATE KEY-----\n" +
+			"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJsZWdhY3kifQ.c3ludGhldGljLXNpZ25hdHVyZQ " + credential +
+			" https://upload.example.invalid/object?X-Amz-Signature=synthetic-legacy-capability&X-Amz-Expires=60",
+	}
+	encoded, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "history.jsonl"), append(encoded, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	history, err := LoadHistory(project, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history length = %d", len(history))
+	}
+	for _, forbidden := range []string{"synthetic-legacy-pem", "eyJhbGci", credential, "synthetic-legacy-capability"} {
+		if strings.Contains(history[0].Output, forbidden) {
+			t.Fatalf("legacy output retained %q: %q", forbidden, history[0].Output)
+		}
+	}
+	if !strings.Contains(history[0].Output, "[redacted]") {
+		t.Fatalf("legacy output omitted redaction marker: %q", history[0].Output)
 	}
 }

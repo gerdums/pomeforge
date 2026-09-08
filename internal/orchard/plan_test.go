@@ -327,6 +327,39 @@ func TestPlanIdentityIncludesIPAContent(t *testing.T) {
 	}
 }
 
+func TestPlanFingerprintFramesProjectFileRecords(t *testing.T) {
+	workspace, project := testProject(t, AppStoreIDs{})
+	firstPath := filepath.Join(project, "zz-a")
+	secondPath := filepath.Join(project, "zz-b")
+	if err := os.WriteFile(firstPath, []byte("A"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secondPath, []byte("B"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	planner := Planner{Workspace: workspace, Tools: availableTools()}
+	first, err := planner.Plan(context.Background(), PlanInput{Action: "build", Project: project})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Without record framing these two project shapes both contribute the raw
+	// stream "zz-a\\0Azz-b\\0B" to the project fingerprint.
+	if err := os.Remove(secondPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(firstPath, []byte("Azz-b\x00B"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second, err := planner.Plan(context.Background(), PlanInput{Action: "build", Project: project})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID == second.ID {
+		t.Fatal("reshaping project files across a path/content boundary did not change plan ID")
+	}
+}
+
 func TestProjectLocalSelectedIPALargerThanSourceLimitUsesIPALimit(t *testing.T) {
 	workspace, project := testProject(t, AppStoreIDs{AppID: "1001"})
 	if err := os.Mkdir(filepath.Join(project, "dist"), 0o755); err != nil {
