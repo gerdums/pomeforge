@@ -9,6 +9,8 @@ Orchard targets Linux distributions through portable amd64 and arm64 binaries. D
 | xtool 1.19.0 | Debian 12, Linux arm64 container | Published AppImage hash verified; extraction and CLI help/version execute without FUSE |
 | ASC 5.0.0 | Debian 12, Linux arm64 container | Published binary hash verified; version and command help execute without network or Apple credentials |
 | zsign 1.1.2 | Debian 12, Linux arm64 container | Published archive hash verified; extracted signer version/help execute |
+| Managed ASC and zsign | Fresh non-root Arch Linux amd64 under QEMU | Real pinned installation, discovery and version checks passed on provisional setup source |
+| xtool 1.19.0 amd64 | Same emulated Arch environment | Pinned download verified; managed AppImage execution blocked by binfmt marker matching, while explicit QEMU extraction and extracted xtool execution passed |
 | AssetKit pinned source | Swift 6.3.3, Linux arm64 container | Upstream test runner reports 38 tests; external rsvg-convert test skipped, Apple assetutil gate unavailable on Linux |
 | Orchard app and CLI | Linux arm64; Arch Linux amd64 under CPU emulation | Baseline binaries, tests and live graphical flow passed; final composed checks tracked in `verification.md` |
 | iOS SDK and app cross-build | Swift 6.3.3 Linux arm64; operator-supplied Xcode 26.6 / iPhoneOS 26.5 SDK | Actual SDK extraction/install and SwiftUI cross-build passed; final release integration remains under verification |

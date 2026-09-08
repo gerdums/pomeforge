@@ -40,15 +40,16 @@ AppImage covers packaging, not every Linux configuration. Check CPU architecture
 
 ## xtool adapter
 
-[Linux installation](https://github.com/xtool-org/xtool/blob/1.19.0/Documentation/xtool.docc/Installation-Linux.md) requires Swift 6.3, usbmuxd and Xcode 26 `.xip`. The user obtains the XIP through Apple's authenticated [downloads page](https://developer.apple.com/download/all/?q=Xcode). xtool extracts it on Linux and installs a Darwin Swift SDK. Do not mirror or bundle Apple's SDK in Orchard's releases.
+[Linux installation](https://github.com/xtool-org/xtool/blob/1.19.0/Documentation/xtool.docc/Installation-Linux.md) requires Swift 6.3, usbmuxd and Xcode 26 `.xip`. The user obtains the XIP through Apple's authenticated [downloads page](https://developer.apple.com/download/all/?q=Xcode). Orchard's verified Linux path extracts the archive with unxip, constructs the Darwin SDK with xtool, stages Clang headers with user ownership, and installs the bundle with Swift. Do not mirror or bundle Apple's SDK in Orchard's releases.
 
 ```sh
 swift --version
-xtool sdk install /path/to/Xcode.xip
-xtool sdk status
+xtool sdk build /path/to/Xcode.app /path/to/fresh-sdk-build --arch arm64
 swift sdk list
 xtool new Hello --skip-setup
 ```
+
+The `sdk build` example is one stage, not the complete import procedure. Upstream `xtool sdk install` attempted to preserve root ownership of Clang headers in our non-root Linux test and failed. The working native installation and explicit XDG store are documented in [Linux toolchain decisions](linux-toolchain-decisions.md). An archive path must not be presented as a working argument to `xtool sdk install`.
 
 `--skip-setup` prevents `new` from starting interactive Apple authentication and SDK setup. `xtool setup` offers public ASC API-key authentication for paid accounts, or Apple ID/password/2FA through private APIs. Use the public-key route for the normal paid-developer workflow. Secrets go to tools through private files or interactive input, never Orchard plan JSON or logs.
 
