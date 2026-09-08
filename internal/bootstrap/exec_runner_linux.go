@@ -5,6 +5,7 @@ package bootstrap
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"syscall"
@@ -23,15 +24,34 @@ func (execRunner) Run(ctx context.Context, executable string, args []string, dir
 		if command.Process == nil || command.Process.Pid <= 0 {
 			return os.ErrProcessDone
 		}
-		err := syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
-		if errors.Is(err, syscall.ESRCH) {
-			return os.ErrProcessDone
-		}
-		return err
+		return killProcessGroup(command.Process.Pid)
 	}
 	buffer := &limitedBuffer{remaining: maxDiagnosticBytes}
 	command.Stdout = buffer
 	command.Stderr = buffer
-	err := command.Run()
-	return buffer.String(), err
+	if err := command.Start(); err != nil {
+		return buffer.String(), err
+	}
+
+	// Setpgid makes the started process the leader of a new process group, so
+	// its positive PID is also the only group ID this runner may signal. Wait
+	// can return while descendants remain alive, including after WaitDelay has
+	// closed inherited output pipes, so always terminate that group afterward.
+	processGroupID := command.Process.Pid
+	runErr := command.Wait()
+	if cleanupErr := killProcessGroup(processGroupID); cleanupErr != nil && !errors.Is(cleanupErr, os.ErrProcessDone) {
+		runErr = errors.Join(runErr, fmt.Errorf("terminate process group %d: %w", processGroupID, cleanupErr))
+	}
+	return buffer.String(), runErr
+}
+
+func killProcessGroup(processGroupID int) error {
+	if processGroupID <= 0 {
+		return fmt.Errorf("invalid process group ID %d", processGroupID)
+	}
+	if err := syscall.Kill(-processGroupID, syscall.SIGKILL); errors.Is(err, syscall.ESRCH) {
+		return os.ErrProcessDone
+	} else {
+		return err
+	}
 }
