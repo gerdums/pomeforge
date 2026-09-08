@@ -67,7 +67,11 @@ pomeforge run build --project ./Garden --execute
 Installing a development app requires an Apple identity and suitable development provisioning. Configure the pinned xtool interactively in a normal terminal. For a Pomeforge-managed installation:
 
 ```sh
-pomeforge_xtool="${XDG_DATA_HOME:-$HOME/.local/share}/pomeforge/bin/xtool"
+case ${XDG_DATA_HOME:-} in
+  /*) pomeforge_data_home=$XDG_DATA_HOME ;;
+  *) pomeforge_data_home=$HOME/.local/share ;;
+esac
+pomeforge_xtool="$pomeforge_data_home/pomeforge/bin/xtool"
 "$pomeforge_xtool" --version
 "$pomeforge_xtool" auth login --mode key
 ```

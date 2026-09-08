@@ -191,7 +191,7 @@ Ctrl-C when finished.
 
 ## SDK and signing inputs
 
-Apple SDK and signing configuration belong only in the private state mount.
+Installed SDK state and signing configuration belong in the private state mount.
 Keep every operator-supplied Xcode archive, SDK source, private key,
 certificate, profile, and pairing record outside the Pomeforge source and project
 directories, and never copy it into an image layer. The [native Linux setup
@@ -285,8 +285,11 @@ installing those exact packages.
 
 ## Physical USB devices
 
-Prefer the host's `usbmuxd`. After installing the device tooling explicitly,
-mount only its Unix socket when the host exposes one:
+Prefer the host's `usbmuxd`. Install the device client utilities inside a derived
+container image. Mounting the host socket provides daemon access; it does not
+make host-installed client executables available inside the container. The base
+Pomeforge image does not include these client utilities. After adding them, use
+your derived image in the command below and mount only the daemon's Unix socket:
 
 ```sh
 test -S /var/run/usbmuxd
@@ -294,7 +297,7 @@ podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
   --volume "$state_dir:/var/lib/pomeforge:Z" \
   --volume "$workspace_dir:/workspace:Z" \
   --volume /var/run/usbmuxd:/var/run/usbmuxd \
-  localhost/pomeforge:local pomeforge doctor
+  localhost/pomeforge-device:local pomeforge doctor
 ```
 
 The host user must be permitted to open the socket. Device trust, Developer
