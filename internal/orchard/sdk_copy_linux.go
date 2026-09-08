@@ -233,6 +233,116 @@ func openOrCreateDirectoryAt(parent *os.File, parts []string) (*os.File, error) 
 	return current, nil
 }
 
+func openDirectoryAt(parent *os.File, parts []string) (*os.File, error) {
+	currentFD, err := syscall.Openat(int(parent.Fd()), ".", syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, err
+	}
+	current := os.NewFile(uintptr(currentFD), parent.Name())
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." || strings.ContainsRune(part, filepath.Separator) {
+			current.Close()
+			return nil, errors.New("invalid contained directory path")
+		}
+		nextFD, openErr := syscall.Openat(int(current.Fd()), part, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+		if openErr != nil {
+			current.Close()
+			return nil, fmt.Errorf("contained directory %s is unavailable or a symlink: %w", part, openErr)
+		}
+		next := os.NewFile(uintptr(nextFD), filepath.Join(current.Name(), part))
+		current.Close()
+		current = next
+	}
+	return current, nil
+}
+
+func directoryDirectlyBelow(directory, parent *os.File) (bool, error) {
+	directoryInfo, err := directory.Stat()
+	if err != nil {
+		return false, err
+	}
+	parentInfo, err := parent.Stat()
+	if err != nil {
+		return false, err
+	}
+	if os.SameFile(directoryInfo, parentInfo) {
+		return false, nil
+	}
+	actualParentFD, err := syscall.Openat(int(directory.Fd()), "..", syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return false, err
+	}
+	actualParent := os.NewFile(uintptr(actualParentFD), filepath.Join(directory.Name(), ".."))
+	defer actualParent.Close()
+	actualParentInfo, err := actualParent.Stat()
+	if err != nil {
+		return false, err
+	}
+	return os.SameFile(actualParentInfo, parentInfo), nil
+}
+
+// openContainedDirectoryAlias is the narrow exception to the SDK copy
+// helpers' no-follow policy. Every ancestor is opened without following links;
+// only the final Clang alias may be followed, and its held target descriptor
+// must select one version directory directly below the staged Clang root.
+func openContainedDirectoryAlias(rootDirectory *os.File, aliasParts, allowedRootParts []string) (*os.File, error) {
+	if len(aliasParts) == 0 || len(allowedRootParts) == 0 {
+		return nil, errors.New("contained directory alias paths are required")
+	}
+	aliasParent, err := openDirectoryAt(rootDirectory, aliasParts[:len(aliasParts)-1])
+	if err != nil {
+		return nil, err
+	}
+	defer aliasParent.Close()
+	aliasName := aliasParts[len(aliasParts)-1]
+	aliasDescriptor := descriptorPath(int(aliasParent.Fd()), aliasName)
+	before, err := os.Lstat(aliasDescriptor)
+	if err != nil {
+		return nil, fmt.Errorf("inspect contained directory alias: %w", err)
+	}
+	if !before.IsDir() && before.Mode()&os.ModeSymlink == 0 {
+		return nil, errors.New("contained directory alias is neither a directory nor a symbolic link")
+	}
+	targetFD, err := syscall.Openat(int(aliasParent.Fd()), aliasName, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, fmt.Errorf("contained directory alias is missing, broken, or cyclic: %w", err)
+	}
+	target := os.NewFile(uintptr(targetFD), filepath.Join(rootDirectory.Name(), filepath.Join(aliasParts...)))
+	after, err := os.Lstat(aliasDescriptor)
+	if err != nil || !os.SameFile(before, after) || before.Mode()&os.ModeType != after.Mode()&os.ModeType {
+		target.Close()
+		return nil, errors.New("contained directory alias was substituted while resolving it")
+	}
+	targetInfo, err := target.Stat()
+	if err != nil {
+		target.Close()
+		return nil, err
+	}
+	if before.IsDir() {
+		if !os.SameFile(before, targetInfo) {
+			target.Close()
+			return nil, errors.New("contained Clang directory was substituted while resolving it")
+		}
+		return target, nil
+	}
+	allowedRoot, err := openDirectoryAt(rootDirectory, allowedRootParts)
+	if err != nil {
+		target.Close()
+		return nil, fmt.Errorf("open contained Clang versions directory: %w", err)
+	}
+	defer allowedRoot.Close()
+	contained, err := directoryDirectlyBelow(target, allowedRoot)
+	if err != nil {
+		target.Close()
+		return nil, fmt.Errorf("validate contained Clang directory alias: %w", err)
+	}
+	if !contained {
+		target.Close()
+		return nil, errors.New("contained Clang directory alias escapes its version directory")
+	}
+	return target, nil
+}
+
 func createFreshPrivateDirectoryWithin(root, target string) (*os.File, error) {
 	parts, err := relativePathParts(root, target, false)
 	if err != nil {
@@ -312,17 +422,58 @@ func replaceDirectoryWithOwnedTree(ctx context.Context, root, relative, source s
 		return err
 	}
 	defer parent.Close()
+	return replaceDirectoryWithOwnedTreeAt(ctx, parent, parts[len(parts)-1], filepath.Join(root, filepath.Dir(relative)), source)
+}
+
+func replaceDirectoryThroughContainedAlias(ctx context.Context, root, aliasRelative, allowedRootRelative, targetRelative, source string) error {
+	if filepath.IsAbs(aliasRelative) || filepath.IsAbs(allowedRootRelative) || filepath.IsAbs(targetRelative) {
+		return errors.New("contained Clang paths must be relative")
+	}
+	aliasParts, err := relativePathParts(root, filepath.Join(root, aliasRelative), false)
+	if err != nil {
+		return err
+	}
+	allowedRootParts, err := relativePathParts(root, filepath.Join(root, allowedRootRelative), false)
+	if err != nil {
+		return err
+	}
+	targetParts, err := relativePathParts(root, filepath.Join(root, targetRelative), false)
+	if err != nil {
+		return err
+	}
+	rootDirectory, err := openDirectoryAbsolute(root)
+	if err != nil {
+		return err
+	}
+	defer rootDirectory.Close()
+	aliasTarget, err := openContainedDirectoryAlias(rootDirectory, aliasParts, allowedRootParts)
+	if err != nil {
+		return err
+	}
+	defer aliasTarget.Close()
+	parent, err := openOrCreateDirectoryAt(aliasTarget, targetParts[:len(targetParts)-1])
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	destinationParent := filepath.Join(root, aliasRelative, filepath.Dir(targetRelative))
+	return replaceDirectoryWithOwnedTreeAt(ctx, parent, targetParts[len(targetParts)-1], destinationParent, source)
+}
+
+func replaceDirectoryWithOwnedTreeAt(ctx context.Context, parent *os.File, leaf, destinationParent, source string) error {
+	if leaf == "" || leaf == "." || leaf == ".." || strings.ContainsRune(leaf, filepath.Separator) {
+		return errors.New("invalid SDK tree destination name")
+	}
 	sourceDirectory, err := openDirectoryAbsolute(source)
 	if err != nil {
 		return err
 	}
 	defer sourceDirectory.Close()
 	temporary := ".orchard-headers-" + operationID()
-	temporaryRoot := filepath.Join(root, filepath.Dir(relative), temporary)
+	temporaryRoot := filepath.Join(destinationParent, temporary)
 	if err := copyOwnedTreeToParent(ctx, sourceDirectory, source, parent, temporary, temporaryRoot); err != nil {
 		return err
 	}
-	leaf := parts[len(parts)-1]
 	backup := ".orchard-replaced-" + operationID()
 	hadOriginal := false
 	if err := syscall.Renameat(int(parent.Fd()), leaf, int(parent.Fd()), backup); err == nil {

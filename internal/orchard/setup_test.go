@@ -273,6 +273,19 @@ func writeBuiltSDKFixture(output string) error {
 	if err := os.Symlink("sdk-marker", filepath.Join(built, "sdk-link")); err != nil {
 		return err
 	}
+	clangLibrary := filepath.Join(built, "Developer", "Toolchains", "XcodeDefault.xctoolchain", "usr", "lib")
+	if err := os.MkdirAll(filepath.Join(clangLibrary, "clang", "21", "include"), 0o700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(clangLibrary, "clang", "21", "include", "staged.h"), []byte("staged header\n"), 0o600); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(clangLibrary, "swift"), 0o700); err != nil {
+		return err
+	}
+	if err := os.Symlink(filepath.Join("..", "clang", "21"), filepath.Join(clangLibrary, "swift", "clang")); err != nil {
+		return err
+	}
 	metadata := fmt.Sprintf(`{"schemaVersion":"4.0","targetTriples":{"%s":{"sdkRootPath":%q}}}`, sdkTargetTriple, filepath.ToSlash(sdkRelative))
 	return os.WriteFile(filepath.Join(built, "swift-sdk.json"), []byte(metadata), 0o600)
 }
@@ -759,6 +772,213 @@ func TestSDKArtifactStagingRejectsEscapingSymlink(t *testing.T) {
 	}
 	if err := stageSDKArtifactBundle(context.Background(), source, filepath.Join(root, "darwin.artifactbundle"), headers, digest); err == nil || !strings.Contains(err.Error(), "escapes") {
 		t.Fatalf("escaping symlink was accepted: %v", err)
+	}
+}
+
+func TestSDKArtifactStagingReplacesHeadersThroughContainedClangAlias(t *testing.T) {
+	root := t.TempDir()
+	buildRoot := filepath.Join(root, "sdk-build")
+	if err := writeBuiltSDKFixture(buildRoot); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(buildRoot, "darwin.xtoolsdk")
+	clangLibrary := filepath.Join("Developer", "Toolchains", "XcodeDefault.xctoolchain", "usr", "lib")
+	aliasRelative := filepath.Join(clangLibrary, "swift", "clang")
+	sourceAlias := filepath.Join(source, aliasRelative)
+	if target, err := os.Readlink(sourceAlias); err != nil || target != filepath.Join("..", "clang", "21") {
+		t.Fatalf("source Clang alias=%q err=%v", target, err)
+	}
+
+	headers := filepath.Join(root, "selected-headers")
+	if err := os.Mkdir(headers, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(headers, "stddef.h"), []byte("selected header\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := hashSafeDirectory(context.Background(), headers, 1<<20, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact := filepath.Join(root, "darwin.artifactbundle")
+	if err := stageSDKArtifactBundle(context.Background(), source, artifact, headers, digest); err != nil {
+		t.Fatal(err)
+	}
+
+	artifactAlias := filepath.Join(artifact, aliasRelative)
+	if target, err := os.Readlink(artifactAlias); err != nil || target != filepath.Join("..", "clang", "21") {
+		t.Fatalf("staged Clang alias=%q err=%v", target, err)
+	}
+	if contents, err := os.ReadFile(filepath.Join(artifactAlias, "include", "stddef.h")); err != nil || string(contents) != "selected header\n" {
+		t.Fatalf("selected staged header=%q err=%v", contents, err)
+	}
+	if _, err := os.Stat(filepath.Join(artifactAlias, "include", "staged.h")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old staged header remains: %v", err)
+	}
+	if contents, err := os.ReadFile(filepath.Join(sourceAlias, "include", "staged.h")); err != nil || string(contents) != "staged header\n" {
+		t.Fatalf("source header changed: %q err=%v", contents, err)
+	}
+	if _, err := os.Stat(filepath.Join(sourceAlias, "include", "stddef.h")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("selected header was written into source: %v", err)
+	}
+}
+
+func TestClangAliasEscapeCannotModifyOutsideHeaders(t *testing.T) {
+	root := t.TempDir()
+	artifact := filepath.Join(root, "darwin.artifactbundle")
+	clangLibrary := filepath.Join(artifact, "Developer", "Toolchains", "XcodeDefault.xctoolchain", "usr", "lib")
+	if err := os.MkdirAll(filepath.Join(clangLibrary, "clang", "21"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(clangLibrary, "swift"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(root, "outside", "21")
+	if err := os.MkdirAll(filepath.Join(outside, "include"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	canary := filepath.Join(outside, "include", "canary.h")
+	if err := os.WriteFile(canary, []byte("outside canary\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(clangLibrary, "swift", "clang")); err != nil {
+		t.Fatal(err)
+	}
+	headers := filepath.Join(root, "selected-headers")
+	if err := os.Mkdir(headers, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(headers, "stddef.h"), []byte("selected\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	libRelative := filepath.Join("Developer", "Toolchains", "XcodeDefault.xctoolchain", "usr", "lib")
+	err := replaceDirectoryThroughContainedAlias(context.Background(), artifact, filepath.Join(libRelative, "swift", "clang"), filepath.Join(libRelative, "clang"), "include", headers)
+	if err == nil || !strings.Contains(err.Error(), "escapes") {
+		t.Fatalf("escaping Clang alias was accepted: %v", err)
+	}
+	if contents, err := os.ReadFile(canary); err != nil || string(contents) != "outside canary\n" {
+		t.Fatalf("outside canary changed: %q err=%v", contents, err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "include", "stddef.h")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("selected header reached outside directory: %v", err)
+	}
+}
+
+func TestClangAliasRejectsMissingBrokenAndCyclicTargets(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		target string
+	}{
+		{name: "missing"},
+		{name: "broken", target: filepath.Join("..", "clang", "99")},
+		{name: "cyclic", target: "clang"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			artifact := filepath.Join(root, "darwin.artifactbundle")
+			libRelative := filepath.Join("Developer", "Toolchains", "XcodeDefault.xctoolchain", "usr", "lib")
+			clangLibrary := filepath.Join(artifact, libRelative)
+			if err := os.MkdirAll(filepath.Join(clangLibrary, "clang", "21", "include"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(clangLibrary, "swift"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if test.target != "" {
+				if err := os.Symlink(test.target, filepath.Join(clangLibrary, "swift", "clang")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			canary := filepath.Join(clangLibrary, "clang", "21", "include", "canary.h")
+			if err := os.WriteFile(canary, []byte("staged canary\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			headers := filepath.Join(root, "selected-headers")
+			if err := os.Mkdir(headers, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(headers, "stddef.h"), []byte("selected\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			err := replaceDirectoryThroughContainedAlias(context.Background(), artifact, filepath.Join(libRelative, "swift", "clang"), filepath.Join(libRelative, "clang"), "include", headers)
+			if err == nil {
+				t.Fatalf("%s Clang alias was accepted", test.name)
+			}
+			if contents, err := os.ReadFile(canary); err != nil || string(contents) != "staged canary\n" {
+				t.Fatalf("staged canary changed: %q err=%v", contents, err)
+			}
+		})
+	}
+}
+
+func TestOpenedClangAliasTargetCannotBeRedirectedByAliasSubstitution(t *testing.T) {
+	root := t.TempDir()
+	artifact := filepath.Join(root, "darwin.artifactbundle")
+	libRelative := filepath.Join("Developer", "Toolchains", "XcodeDefault.xctoolchain", "usr", "lib")
+	clangLibrary := filepath.Join(artifact, libRelative)
+	inside := filepath.Join(clangLibrary, "clang", "21")
+	if err := os.MkdirAll(filepath.Join(inside, "include"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(clangLibrary, "swift"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(clangLibrary, "swift", "clang")
+	if err := os.Symlink(filepath.Join("..", "clang", "21"), alias); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(root, "outside", "21")
+	if err := os.MkdirAll(filepath.Join(outside, "include"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	canary := filepath.Join(outside, "include", "canary.h")
+	if err := os.WriteFile(canary, []byte("outside canary\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rootDirectory, err := openDirectoryAbsolute(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rootDirectory.Close()
+	aliasParts, err := relativePathParts(artifact, alias, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowedParts, err := relativePathParts(artifact, filepath.Join(clangLibrary, "clang"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	openedTarget, err := openContainedDirectoryAlias(rootDirectory, aliasParts, allowedParts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer openedTarget.Close()
+	if err := os.Remove(alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, alias); err != nil {
+		t.Fatal(err)
+	}
+
+	headers := filepath.Join(root, "selected-headers")
+	if err := os.Mkdir(headers, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(headers, "stddef.h"), []byte("selected\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaceDirectoryWithOwnedTreeAt(context.Background(), openedTarget, "include", inside, headers); err != nil {
+		t.Fatal(err)
+	}
+	if contents, err := os.ReadFile(filepath.Join(inside, "include", "stddef.h")); err != nil || string(contents) != "selected\n" {
+		t.Fatalf("held contained target was not updated: %q err=%v", contents, err)
+	}
+	if contents, err := os.ReadFile(canary); err != nil || string(contents) != "outside canary\n" {
+		t.Fatalf("outside canary changed after alias substitution: %q err=%v", contents, err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "include", "stddef.h")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("replacement followed substituted alias: %v", err)
 	}
 }
 

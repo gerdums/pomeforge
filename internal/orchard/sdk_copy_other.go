@@ -28,6 +28,10 @@ func replaceDirectoryWithOwnedTree(context.Context, string, string, string) erro
 	return errors.New("safe SDK header replacement is supported only on Linux")
 }
 
+func replaceDirectoryThroughContainedAlias(context.Context, string, string, string, string, string) error {
+	return errors.New("safe SDK header alias resolution is supported only on Linux")
+}
+
 func writeExclusiveFileWithin(string, string, []byte, uint32) error {
 	return errors.New("safe SDK metadata snapshots are supported only on Linux")
 }

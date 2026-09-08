@@ -960,11 +960,10 @@ func stageSDKArtifactBundle(ctx context.Context, builtSDK, artifactBundle, clang
 	if err != nil || !strings.EqualFold(digest, expectedHeadersDigest) {
 		return errors.New("selected Clang header tree changed after planning")
 	}
-	target := filepath.Join(artifactBundle, "Developer", "Toolchains", "XcodeDefault.xctoolchain", "usr", "lib", "swift", "clang", "include")
-	if !lexicalPathInsideAny(target, artifactBundle) {
-		return errors.New("Clang header destination escapes artifact bundle")
-	}
-	if err := replaceDirectoryWithOwnedTree(ctx, artifactBundle, mustRelative(artifactBundle, target), clangHeaders); err != nil {
+	toolchainLibrary := filepath.Join("Developer", "Toolchains", "XcodeDefault.xctoolchain", "usr", "lib")
+	clangAlias := filepath.Join(toolchainLibrary, "swift", "clang")
+	clangVersions := filepath.Join(toolchainLibrary, "clang")
+	if err := replaceDirectoryThroughContainedAlias(ctx, artifactBundle, clangAlias, clangVersions, "include", clangHeaders); err != nil {
 		return fmt.Errorf("copy selected Clang headers: %w", err)
 	}
 	return nil
