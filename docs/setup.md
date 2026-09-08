@@ -18,7 +18,8 @@ installer, verifies the complete installed tree and active link, and never uses
 doctor` and `orchard tools` only perform bounded read-only discovery; they do
 not download or repair tools.
 
-Swift 6.3 or later remains a separately installed prerequisite. Linux runtime
+Install Swift 6.3 or later using the [official Linux instructions](https://www.swift.org/install/linux/),
+then check `swift --version`. Linux runtime
 libraries, `usbmuxd`, device permissions, pairing, Developer Mode, Apple
 account access, and applicable Apple license terms remain explicit operator
 prerequisites.
@@ -61,14 +62,25 @@ receipt is present.
 
 ## Import an operator-supplied Apple SDK
 
-Orchard never downloads Xcode or Apple SDK content. Supply either an extracted
-`Xcode.app` directory or an XIP obtained by the operator:
+Open [Apple's Xcode downloads](https://developer.apple.com/download/all/?q=Xcode)
+in your Linux browser, sign in, and download the Xcode 26 XIP. This is the
+authenticated download route documented by [xtool's Linux guide](https://github.com/xtool-org/xtool/blob/1.19.0/Documentation/xtool.docc/Installation-Linux.md).
+The file is an archive input; Xcode does not run during import or compilation.
+Review the [SDK terms and provenance boundary](toolchain-research.md#sdk-license-boundary).
+
+Orchard never downloads Xcode or Apple SDK content. Supply the downloaded XIP
+or an already extracted `Xcode.app` directory:
 
 ```sh
 orchard sdk status --execute --json
-orchard sdk import --input /absolute/path/Xcode.app --arch x86_64 --json
-orchard sdk import --input /absolute/path/Xcode.app --arch x86_64 --execute --json
+orchard sdk import --input "$HOME/Downloads/Xcode.xip" --arch x86_64 --json
+orchard sdk import --input "$HOME/Downloads/Xcode.xip" --arch x86_64 --execute --json
 ```
+
+Replace `Xcode.xip` with the downloaded filename. Use `x86_64` for a Linux
+amd64 host or `arm64` for a Linux arm64 host. Leave space for the archive,
+extracted Xcode files, staged SDK and installed SDK; failed staging trees are
+preserved for diagnosis.
 
 For XIP input, Orchard runs `unxip --statistics INPUT.xip FRESH_OUTPUT_DIR`,
 discovers the extracted `Xcode.app`, then uses xtool 1.19's exact contract:
