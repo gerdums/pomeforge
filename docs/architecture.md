@@ -22,13 +22,19 @@ flowchart TD
     CLI --> Core
     Core --> Tools[Versioned tool adapters]
     Tools --> Xtool[xtool and Swift SDK]
+    Xtool --> Bundle[Unsigned app bundle]
+    Bundle --> Assets[AssetKit catalog compiler]
+    Assets --> Sign[zsign distribution signer]
+    Identity[Private identity and trusted profile] --> Sign
+    Sign --> Inspect[IPA inspection and SHA-256 receipt]
     Tools --> Device[Physical iPhone or iPad]
     Tools --> ASC[ASC CLI]
+    Inspect --> ASC
     ASC --> Apple[App Store Connect]
     Core --> Evidence[Private local operation records]
 ```
 
-Use Go with its standard library for a small self-contained executable, Linux amd64 and arm64 builds, subprocess control, HTTP, and embedded assets. The initial graphical app is a local browser workspace with a Linux desktop launcher. A packaged native window can reuse that workspace later. It is not an editor, iOS simulator, or browser-based rendering of an iOS application.
+Use Go with its standard library for a small self-contained executable, Linux amd64 and arm64 builds, subprocess control, HTTP, and embedded assets. Two pinned parsing dependencies handle Apple XML/binary plists and CMS signatures. The asset compiler is a separate Swift executable using pinned AssetKit source. The initial graphical app is a local browser workspace with a Linux desktop launcher. A packaged native window can reuse that workspace later. It is not an editor, iOS simulator, or browser-based rendering of an iOS application.
 
 The CLI and HTTP API call the same Go services. There is no frontend-only fake build path. Each operation starts as a plan containing a stable ID, executable and argv, working directory, prerequisites, effect class, warnings, and whether confirmation is required. The executor accepts only known operations, reconstructs plans from validated project data, detects stale inputs, uses argument arrays without a shell, and records exit status. App Store writes require explicit confirmation. Build hooks and package plugins can execute project code, so builds are explicit user actions.
 

@@ -1,10 +1,12 @@
 # Shared implementation contract
 
-Module: `orchard.local/orchard`. Go 1.24 standard library preferred, no external dependencies. Binary: `cmd/orchard`. Static assets: `internal/web/assets/index.html`, `app.js`, `style.css`. Core owns all Go files and tests. App packet owns only static assets and `packaging/`.
+Module: `orchard.local/orchard`. Go 1.24 standard library preferred; distribution adds pinned plist/CMS parsers. Binary: `cmd/orchard`. Static assets: `internal/web/assets/index.html`, `app.js`, `style.css`. Core owns CLI/server Go files and tests. Separate bootstrap/distribution packets own their Go packages. App packet owns only static assets and `packaging/`.
 
 CLI minimum: `orchard version`, `orchard schema --json`, `orchard init NAME --dir PATH --bundle-id ID --json`, `orchard doctor --json`, `orchard tools --json`, `orchard plan ACTION --project PATH --json`, `orchard run ACTION --project PATH --execute [--confirm] --json`, `orchard app --workspace PATH --listen 127.0.0.1:PORT`. Global `--json` supported consistently. Optional operation inputs: `--ipa PATH`, `--device ID`. Unknown flags must fail.
 
 API uses a session token initially passed as URL fragment `#token=...`. JavaScript removes fragment and sends `Authorization: Bearer TOKEN`. Every API response is `{ok:true,data:...}` or `{ok:false,error:{code,message}}`. Root GET serves assets. API rejects foreign Host/Origin and lacks permissive CORS.
+
+If execution was attempted and failed, the error can additionally include `error.result` with the bounded, redacted operation result. The app must retain and display its status, exit code and output while consuming the attempted plan.
 
 - `GET /api/state`: data is `{version, workspace, projects:[{path,name,bundleId}], tools:[{id,name,status,version,path,detail,installUrl}], capabilities:[{id,title,status,detail}], actions:[{id,title,description,requiresConfirmation}], history:[]}`. Paths for API project operations are relative to workspace.
 - `POST /api/projects` body `{name,bundleId,directory}` creates a new project without overwriting and returns `{path,name,bundleId}`.
