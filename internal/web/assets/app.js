@@ -44,6 +44,14 @@
       "tool-count", "tool-list", "capability-list", "result-list", "create-project-dialog",
       "create-project-form", "project-name", "bundle-id", "project-directory", "create-status",
       "submit-create-project", "close-create-project", "cancel-create-project"
+	  , "empty-open-setup", "setup-action-select", "setup-tool-field", "setup-tool-select",
+      "setup-helper-field", "setup-helper-select", "setup-helper-path-field", "setup-helper-path",
+      "setup-source-revision-field", "setup-source-revision", "setup-assetkit-revision-field",
+      "setup-assetkit-revision", "setup-sdk-input-field", "setup-sdk-input", "setup-sdk-arch-field",
+      "setup-sdk-arch", "review-setup-plan", "setup-plan-status", "setup-plan-panel", "setup-plan-title",
+      "setup-plan-blockers", "setup-blocker-list", "setup-plan-warnings", "setup-warning-list",
+      "setup-plan-steps", "setup-confirmation-field", "confirm-setup-execution", "run-setup-plan",
+      "setup-execution-status"
     ];
 
     ids.forEach((id) => { elements[id] = doc.getElementById(id); });
@@ -53,10 +61,14 @@
       selectedProject: "",
       selectedAction: "",
       currentPlan: null,
+	  selectedSetupAction: "",
+      currentSetupPlan: null,
+	  setupInputRevision: 0,
+      setupRequestSequence: 0,
       inputRevision: 0,
       planRequestSequence: 0,
       disconnected: false,
-      busy: { state: false, plan: false, run: false, create: false },
+	  busy: { state: false, plan: false, run: false, create: false, setupPlan: false, setupRun: false },
       previousFocus: null,
       sessionResults: [],
       results: []
@@ -177,7 +189,21 @@
       elements["run-plan"].disabled = unavailable || !plan || plan.executable !== true || blockers.length > 0 || !confirmationSatisfied;
       elements["refresh-diagnostics"].disabled = unavailable;
       elements["submit-create-project"].disabled = unavailable;
+	  elements["setup-action-select"].disabled = unavailable;
+      elements["setup-tool-select"].disabled = unavailable;
+      elements["setup-helper-select"].disabled = unavailable;
+      elements["setup-helper-path"].disabled = unavailable;
+      elements["setup-source-revision"].disabled = unavailable;
+      elements["setup-assetkit-revision"].disabled = unavailable;
+      elements["setup-sdk-input"].disabled = unavailable;
+      elements["setup-sdk-arch"].disabled = unavailable;
+      elements["review-setup-plan"].disabled = unavailable || !state.selectedSetupAction || !setupInputsComplete();
+      const setupPlan = state.currentSetupPlan;
+      const setupBlockers = setupPlan ? normalizedList(setupPlan.blockers) : [];
+      const setupConfirmed = !setupPlan || !setupPlan.requiresConfirmation || elements["confirm-setup-execution"].checked;
+      elements["run-setup-plan"].disabled = unavailable || !setupPlan || setupPlan.executable !== true || setupBlockers.length > 0 || !setupConfirmed;
 
+	  elements["empty-open-setup"].disabled = unavailable;
       const createButtons = doc.querySelectorAll("#open-create-project, #header-create-project, #empty-create-project");
       createButtons.forEach((button) => { button.disabled = unavailable; });
     }
@@ -254,7 +280,7 @@
     }
 
     function renderActions() {
-      const actions = normalizedList(state.server.actions);
+	  const actions = normalizedList(state.server.actions).filter((action) => action.scope !== "workspace");
       const previousSelection = state.selectedAction;
       elements["action-select"].replaceChildren();
 
@@ -271,6 +297,55 @@
       state.selectedAction = actions.some((action) => action.id === previousSelection) ? previousSelection : "";
       elements["action-select"].value = state.selectedAction;
       renderActionFields();
+    }
+
+    function setupInputsComplete() {
+      switch (state.selectedSetupAction) {
+      case "tool-install": return Boolean(elements["setup-tool-select"].value);
+      case "helper-register": return Boolean(elements["setup-helper-select"].value && elements["setup-helper-path"].value.trim());
+      case "sdk-status": return true;
+      case "sdk-import": return Boolean(elements["setup-sdk-input"].value.trim() && elements["setup-sdk-arch"].value);
+      default: return false;
+      }
+    }
+
+    function renderSetupActions() {
+      const actions = normalizedList(state.server.actions).filter((action) => action.scope === "workspace");
+      elements["setup-action-select"].replaceChildren();
+      const prompt = createElement("option", "", actions.length ? "Choose a setup operation" : "No setup operations available");
+      prompt.value = "";
+      elements["setup-action-select"].append(prompt);
+      actions.forEach((action) => {
+        const option = createElement("option", "", textValue(action.title, action.id));
+        option.value = action.id;
+        elements["setup-action-select"].append(option);
+      });
+      if (!actions.some((action) => action.id === state.selectedSetupAction)) state.selectedSetupAction = "";
+      elements["setup-action-select"].value = state.selectedSetupAction;
+      renderSetupFields();
+    }
+
+    function renderSetupFields() {
+      const action = state.selectedSetupAction;
+      elements["setup-tool-field"].hidden = action !== "tool-install";
+      const helper = action === "helper-register";
+      elements["setup-helper-field"].hidden = !helper;
+      elements["setup-helper-path-field"].hidden = !helper;
+      elements["setup-source-revision-field"].hidden = !helper;
+      elements["setup-assetkit-revision-field"].hidden = !helper || elements["setup-helper-select"].value !== "orchard-assets";
+      elements["setup-sdk-input-field"].hidden = action !== "sdk-import";
+      elements["setup-sdk-arch-field"].hidden = action !== "sdk-import";
+    }
+
+    function invalidateSetupPlan(message) {
+      state.setupInputRevision += 1;
+      state.setupRequestSequence += 1;
+      state.currentSetupPlan = null;
+      elements["confirm-setup-execution"].checked = false;
+      elements["setup-plan-panel"].hidden = true;
+      elements["setup-execution-status"].textContent = "";
+      elements["setup-plan-status"].textContent = message || "Setup inputs changed. Review a new plan before running.";
+      updateControls();
     }
 
     function statusClass(status) {
@@ -332,17 +407,23 @@
 
     function renderResults() {
       elements["result-list"].replaceChildren();
-      if (state.results.length === 0) {
+	  const visibleResults = state.results.filter((result) => !result || result.scope === "workspace" || !result.scope || result.project === state.selectedProject);
+      if (visibleResults.length === 0) {
         elements["result-list"].append(createElement("p", "empty-row", "No operations have been run in this workspace."));
         return;
       }
 
-      state.results.forEach((result) => {
+	  visibleResults.forEach((result) => {
         const entry = createElement("article", "result-entry");
         const header = createElement("div", "result-header");
         const title = createElement("div");
         title.append(createElement("h2", "", textValue(result.action, "Operation result")));
-        title.append(createElement("p", "", `Record ${textValue(result.id, "without an identifier")}`));
+		const scopeLabel = result.scope === "workspace"
+          ? "Workspace setup"
+          : result.scope === "project"
+            ? `${textValue(result.projectLabel, "Project")} · ${textValue(result.project, "unknown path")}`
+            : "Legacy unscoped record";
+        title.append(createElement("p", "", `${scopeLabel} · Record ${textValue(result.id, "without an identifier")}`));
         header.append(title, createElement("span", `status-badge ${statusClass(result.status)}`, textValue(result.status, "unknown")));
 
         const metadata = createElement("div", "result-meta");
@@ -352,7 +433,11 @@
           createElement("span", "", `Finished: ${displayTimestamp(result.finishedAt)}`)
         );
         const output = createElement("pre", "log-output", typeof result.output === "string" ? result.output : "No output was returned.");
-        entry.append(header, metadata, output);
+		entry.append(header, metadata);
+        if (result.metadata && typeof result.metadata === "object" && !Array.isArray(result.metadata)) {
+          entry.append(createElement("pre", "result-metadata", JSON.stringify(result.metadata, null, 2)));
+        }
+        entry.append(output);
         elements["result-list"].append(entry);
       });
     }
@@ -377,10 +462,12 @@
       elements["workspace-path"].textContent = textValue(state.server.workspace, "Local workspace");
       renderProjects(preferredProject);
       renderActions();
+	  renderSetupActions();
       renderDiagnostics();
       state.results = mergeResultRecords(state.sessionResults, state.server.history);
       renderResults();
       invalidatePlan(state.selectedProject ? "Choose an operation to continue." : "Create a project to continue.");
+	  invalidateSetupPlan(state.selectedSetupAction ? "Review this setup operation before running." : "Choose a setup operation.");
     }
 
     async function loadState(optionsValue) {
@@ -470,6 +557,134 @@
         elements["plan-status"].textContent = "Plan is ready to run.";
       }
       updateControls();
+    }
+
+    function renderSetupPlan(plan) {
+      const blockers = normalizedList(plan.blockers);
+      const warnings = normalizedList(plan.warnings);
+      elements["setup-plan-panel"].hidden = false;
+      elements["setup-plan-title"].textContent = textValue(plan.title, "Setup plan");
+      elements["setup-plan-blockers"].hidden = blockers.length === 0;
+      elements["setup-plan-warnings"].hidden = warnings.length === 0;
+      appendMessages(elements["setup-blocker-list"], blockers);
+      appendMessages(elements["setup-warning-list"], warnings);
+      elements["setup-plan-steps"].replaceChildren();
+      normalizedList(plan.steps).forEach((step, index) => {
+        const article = createElement("article", "plan-step");
+        const header = createElement("div", "plan-step-header");
+        const description = createElement("div");
+        description.append(createElement("h3", "", `Step ${index + 1}`));
+        description.append(createElement("p", "", textValue(step.description, "No step description was provided.")));
+        header.append(description, createElement("span", "tool-label", textValue(step.tool, "tool")));
+        article.append(header);
+        const scroll = createElement("div", "command-scroll");
+        const command = createElement("code", "argv");
+        if (step.kind === "internal") {
+          command.setAttribute("aria-label", "Structured Orchard internal operation");
+          command.append(createElement("span", "argv-executable", `Orchard: ${textValue(step.operation, "internal operation")}`));
+          Object.keys(step.parameters || {}).sort().forEach((key) => {
+            command.append(createElement("span", "argv-boundary", "·"));
+            command.append(createElement("span", "argv-argument", `${key}=${step.parameters[key]}`));
+          });
+          scroll.append(command, createElement("p", "shell-note", "This is a structured internal operation, not a fabricated shell command."));
+        } else {
+          command.setAttribute("aria-label", "Executable followed by individually bounded arguments");
+          command.append(createElement("span", "argv-executable", textValue(step.executable, "Executable unavailable")));
+          normalizedList(step.args).forEach((argument) => {
+            command.append(createElement("span", "argv-boundary", "·"));
+            command.append(createElement("span", "argv-argument", String(argument)));
+          });
+          scroll.append(command, createElement("p", "shell-note", "Argument boxes show process boundaries; this is display only, not shell syntax."));
+        }
+        article.append(scroll);
+        elements["setup-plan-steps"].append(article);
+      });
+      elements["setup-confirmation-field"].hidden = plan.requiresConfirmation !== true;
+      elements["confirm-setup-execution"].checked = false;
+      elements["setup-plan-status"].textContent = blockers.length
+        ? "Setup plan is blocked. Resolve the listed prerequisites and review again."
+        : plan.executable === true ? "Setup plan is ready to run." : "This setup plan cannot be executed.";
+      updateControls();
+    }
+
+    function setupPlanPayload() {
+      const body = { action: state.selectedSetupAction };
+      if (state.selectedSetupAction === "tool-install") body.tool = elements["setup-tool-select"].value;
+      if (state.selectedSetupAction === "helper-register") {
+        body.helper = elements["setup-helper-select"].value;
+        body.executablePath = elements["setup-helper-path"].value.trim();
+        if (elements["setup-source-revision"].value.trim()) body.sourceRevision = elements["setup-source-revision"].value.trim();
+		if (body.helper === "orchard-assets" && elements["setup-assetkit-revision"].value.trim()) body.assetKitRevision = elements["setup-assetkit-revision"].value.trim();
+      }
+      if (state.selectedSetupAction === "sdk-import") {
+        body.inputPath = elements["setup-sdk-input"].value.trim();
+        body.arch = elements["setup-sdk-arch"].value;
+      }
+      return body;
+    }
+
+    async function reviewSetupPlan() {
+      if (state.busy.setupPlan || anyBusy() || state.disconnected || !state.selectedSetupAction || !setupInputsComplete()) return;
+      invalidateSetupPlan("Reviewing setup plan…");
+      const revision = state.setupInputRevision;
+      const requestSequence = state.setupRequestSequence;
+      state.busy.setupPlan = true;
+      updateControls();
+      try {
+        const plan = await apiRequest("/api/plan", { method: "POST", body: setupPlanPayload() });
+        if (revision !== state.setupInputRevision || requestSequence !== state.setupRequestSequence) return;
+        state.currentSetupPlan = plan;
+        renderSetupPlan(plan || {});
+      } catch (error) {
+        if (!state.disconnected) elements["setup-plan-status"].textContent = error.message;
+      } finally {
+        state.busy.setupPlan = false;
+        updateControls();
+      }
+    }
+
+    async function runSetupPlan() {
+      const plan = state.currentSetupPlan;
+      if (state.busy.setupRun || anyBusy() || state.disconnected || !plan || plan.executable !== true || normalizedList(plan.blockers).length) return;
+      const confirmed = elements["confirm-setup-execution"].checked;
+      if (plan.requiresConfirmation === true && !confirmed) return;
+      state.busy.setupRun = true;
+      elements["setup-execution-status"].textContent = "Setup operation running…";
+      updateControls();
+      try {
+        const result = await apiRequest("/api/run", { method: "POST", body: { planId: plan.id, confirm: confirmed } });
+        state.sessionResults = mergeResultRecords(result && typeof result === "object" ? [result] : [], state.sessionResults);
+        state.results = mergeResultRecords(state.sessionResults, state.results);
+        renderResults();
+        state.currentSetupPlan = null;
+        elements["setup-plan-panel"].hidden = true;
+		elements["confirm-setup-execution"].checked = false;
+		const outcome = `Setup operation ${textValue(result && result.status, "finished")}.`;
+        state.busy.setupRun = false;
+        await loadState();
+        showView("prerequisites");
+		elements["setup-execution-status"].textContent = outcome;
+        return;
+      } catch (error) {
+        const refreshDiagnostics = Boolean(error.result);
+        if (error.result) {
+          state.sessionResults = mergeResultRecords([error.result], state.sessionResults);
+          state.results = mergeResultRecords(state.sessionResults, state.results);
+          renderResults();
+        }
+		state.currentSetupPlan = null;
+		elements["confirm-setup-execution"].checked = false;
+		elements["setup-plan-panel"].hidden = true;
+        if (refreshDiagnostics && !state.disconnected) {
+          state.busy.setupRun = false;
+          await loadState();
+          showView("prerequisites");
+        }
+        if (!state.disconnected) elements["setup-execution-status"].textContent = error.message;
+      } finally {
+        state.busy.setupRun = false;
+        updateControls();
+      }
     }
 
     function planPayload() {
@@ -603,6 +818,7 @@
       elements["project-select"].addEventListener("change", () => {
         state.selectedProject = elements["project-select"].value;
         renderProjectDetails();
+		renderResults();
         invalidatePlan("Project changed. Choose an operation and review a new plan.");
       });
 
@@ -619,6 +835,26 @@
       elements["confirm-execution"].addEventListener("change", updateControls);
       elements["review-plan"].addEventListener("click", reviewPlan);
       elements["run-plan"].addEventListener("click", runPlan);
+	  elements["setup-action-select"].addEventListener("change", () => {
+        state.selectedSetupAction = elements["setup-action-select"].value;
+        renderSetupFields();
+        invalidateSetupPlan(state.selectedSetupAction ? "Review this setup operation before running." : "Choose a setup operation.");
+      });
+      elements["setup-helper-select"].addEventListener("change", () => {
+        renderSetupFields();
+        invalidateSetupPlan("Setup inputs changed. Review a new plan before running.");
+      });
+      ["setup-tool-select", "setup-helper-path", "setup-source-revision", "setup-assetkit-revision", "setup-sdk-input", "setup-sdk-arch"].forEach((id) => {
+        elements[id].addEventListener("input", () => invalidateSetupPlan("Setup inputs changed. Review a new plan before running."));
+        elements[id].addEventListener("change", () => invalidateSetupPlan("Setup inputs changed. Review a new plan before running."));
+      });
+      elements["confirm-setup-execution"].addEventListener("change", updateControls);
+      elements["review-setup-plan"].addEventListener("click", reviewSetupPlan);
+      elements["run-setup-plan"].addEventListener("click", runSetupPlan);
+	  elements["empty-open-setup"].addEventListener("click", () => {
+        showView("prerequisites");
+        elements["setup-action-select"].focus();
+      });
       elements["refresh-diagnostics"].addEventListener("click", () => loadState());
       elements["retry-connection"].addEventListener("click", () => loadState({ retry: true }));
 
@@ -657,8 +893,11 @@
       loadState,
       reviewPlan,
       runPlan,
+	  reviewSetupPlan,
+      runSetupPlan,
       createProject,
       invalidatePlan,
+	  invalidateSetupPlan,
       showView,
       state
     });

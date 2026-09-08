@@ -21,7 +21,13 @@ const elementIds = [
   "tool-count", "tool-list", "capability-list", "result-list", "create-project-dialog",
   "create-project-form", "project-name", "bundle-id", "project-directory", "create-status",
   "submit-create-project", "close-create-project", "cancel-create-project", "open-create-project",
-  "header-create-project", "empty-create-project"
+	"header-create-project", "empty-create-project", "empty-open-setup", "setup-action-select",
+  "setup-tool-field", "setup-tool-select", "setup-helper-field", "setup-helper-select",
+  "setup-helper-path-field", "setup-helper-path", "setup-source-revision-field", "setup-source-revision",
+  "setup-assetkit-revision-field", "setup-assetkit-revision", "setup-sdk-input-field", "setup-sdk-input",
+  "setup-sdk-arch-field", "setup-sdk-arch", "review-setup-plan", "setup-plan-status", "setup-plan-panel",
+  "setup-plan-title", "setup-plan-blockers", "setup-blocker-list", "setup-plan-warnings", "setup-warning-list",
+  "setup-plan-steps", "setup-confirmation-field", "confirm-setup-execution", "run-setup-plan", "setup-execution-status"
 ];
 
 class FakeClassList {
@@ -460,4 +466,137 @@ test("transport failure disables requests until an explicit retry succeeds", asy
   assert.equal(calls, 2);
   assert.equal(app.state.disconnected, false);
   assert.equal(document.getElementById("app-alert").hidden, true);
+});
+
+test("empty workspace can plan and run a pinned tool install with structured internal steps", async () => {
+  const requests = [];
+  let stateLoads = 0;
+  const workspaceAction = {
+    id: "tool-install", title: "Install pinned tool", description: "Install one tool.",
+    scope: "workspace", requiresConfirmation: false
+  };
+  const { app, document } = createHarness(async (path, init) => {
+    requests.push({ path, init });
+    if (path === "/api/state") {
+      stateLoads += 1;
+      return apiResponse(baseState({ projects: [], actions: [workspaceAction], tools: stateLoads > 1 ? [{ id: "asc", name: "ASC CLI", status: "available", detail: "verified" }] : [] }));
+    }
+    if (path === "/api/plan") return apiResponse({
+      id: "setup-plan", action: "tool-install", title: "Install pinned tool", scope: "workspace",
+      blockers: [], warnings: [], executable: true, requiresConfirmation: false,
+      steps: [{ kind: "internal", tool: "orchard", operation: "verified-managed-install", parameters: { tool: "asc", sha256: "abc" }, description: "Verify and install." }]
+    });
+    return apiResponse({ id: "setup-result", action: "tool-install", scope: "workspace", status: "succeeded", exitCode: 0, output: "installed" });
+  });
+  await app.start();
+  assert.equal(document.getElementById("empty-projects").hidden, false);
+  document.getElementById("setup-action-select").value = "tool-install";
+  document.getElementById("setup-tool-select").value = "asc";
+  await document.getElementById("setup-action-select").dispatch("change");
+  await app.reviewSetupPlan();
+  assert.deepEqual(JSON.parse(requests[1].init.body), { action: "tool-install", tool: "asc" });
+  assert.equal(document.getElementById("run-setup-plan").disabled, false);
+  const rendered = descendants(document.getElementById("setup-plan-steps")).map((element) => element.textContent);
+  assert.ok(rendered.includes("Orchard: verified-managed-install"));
+  await app.runSetupPlan();
+  assert.deepEqual(JSON.parse(requests[2].init.body), { planId: "setup-plan", confirm: false });
+  assert.equal(stateLoads, 2);
+  assert.equal(app.state.results[0].output, "installed");
+	assert.equal(document.getElementById("setup-plan-panel").hidden, true);
+	assert.equal(document.getElementById("setup-execution-status").textContent, "Setup operation succeeded.");
+	assert.match(descendants(document.getElementById("tool-list")).map((element) => element.textContent).join("\n"), /ASC CLI/);
+	assert.match(html, /id="setup-plan-panel"[\s\S]*?<\/div>\s*<p id="setup-execution-status"/);
+});
+
+test("failed setup execution keeps a visible result notice and consumes the plan", async () => {
+  const failed = { id: "setup-failed", action: "sdk-import", scope: "workspace", status: "failed", exitCode: 9, output: "safe failure" };
+  const workspaceAction = { id: "sdk-status", title: "Inspect SDK", scope: "workspace", requiresConfirmation: false };
+  const { app, document } = createHarness(async (path) => {
+    if (path === "/api/state") return apiResponse(baseState({ actions: [workspaceAction] }));
+    if (path === "/api/plan") return apiResponse({ id: "setup-plan", action: "sdk-status", title: "Inspect SDK", blockers: [], warnings: [], executable: true, requiresConfirmation: false, steps: [] });
+    return apiError("SDK operation failed.", failed, 422);
+  });
+  await app.start();
+  document.getElementById("setup-action-select").value = "sdk-status";
+  await document.getElementById("setup-action-select").dispatch("change");
+  await app.reviewSetupPlan();
+  await app.runSetupPlan();
+  assert.equal(app.state.currentSetupPlan, null);
+  assert.equal(document.getElementById("setup-plan-panel").hidden, true);
+  assert.equal(document.getElementById("setup-execution-status").textContent, "SDK operation failed.");
+  assert.equal(app.state.results[0], failed);
+});
+
+test("setup error results refresh diagnostics after a completed mutation", async () => {
+  let stateLoads = 0;
+  const completed = { id: "setup-complete", action: "tool-install", scope: "workspace", status: "succeeded", exitCode: 0, output: "installed; history failed" };
+  const workspaceAction = { id: "tool-install", title: "Install pinned tool", scope: "workspace", requiresConfirmation: false };
+  const { app, document } = createHarness(async (path) => {
+    if (path === "/api/state") {
+      stateLoads += 1;
+      return apiResponse(baseState({ actions: [workspaceAction], tools: stateLoads > 1 ? [{ id: "asc", name: "ASC CLI", status: "available", detail: "verified" }] : [] }));
+    }
+    if (path === "/api/plan") return apiResponse({ id: "setup-plan", action: "tool-install", title: "Install pinned tool", blockers: [], warnings: [], executable: true, requiresConfirmation: false, steps: [] });
+    return apiError("Operation completed, but saving workspace history failed.", completed, 500);
+  });
+  await app.start();
+  document.getElementById("setup-action-select").value = "tool-install";
+  document.getElementById("setup-tool-select").value = "asc";
+  await document.getElementById("setup-action-select").dispatch("change");
+  await app.reviewSetupPlan();
+  await app.runSetupPlan();
+  assert.equal(stateLoads, 2);
+  assert.equal(app.state.results[0], completed);
+  assert.match(descendants(document.getElementById("tool-list")).map((element) => element.textContent).join("\n"), /ASC CLI/);
+  assert.equal(document.getElementById("setup-execution-status").textContent, "Operation completed, but saving workspace history failed.");
+});
+
+test("blocked capability details render missing prerequisites without availability claims", async () => {
+  const detail = "Required prerequisites are unavailable: xtool is missing (executable not found). Install or verify them, then refresh diagnostics.";
+  const { app, document } = createHarness(async () => apiResponse(baseState({ capabilities: [{ id: "local-build", title: "Local iOS build", status: "blocked", detail }] })));
+  await app.start();
+  const rendered = descendants(document.getElementById("capability-list")).map((element) => element.textContent).join("\n");
+  assert.match(rendered, /xtool is missing/);
+  assert.doesNotMatch(rendered, /tools and SDK are available/);
+});
+
+test("all setup input changes and failed replans invalidate prior authorization", async () => {
+  let plans = 0;
+  const workspaceAction = { id: "helper-register", title: "Register helper", scope: "workspace", requiresConfirmation: false };
+  const { app, document } = createHarness(async (path) => {
+    if (path === "/api/state") return apiResponse(baseState({ actions: [workspaceAction] }));
+    plans += 1;
+    if (plans === 1) return apiResponse({ id: "helper-plan", title: "Register helper", blockers: [], warnings: [], executable: true, steps: [] });
+    return apiError("Helper replan failed.", undefined, 400);
+  });
+  await app.start();
+  document.getElementById("setup-action-select").value = "helper-register";
+  document.getElementById("setup-helper-select").value = "orchard-assets";
+  document.getElementById("setup-helper-path").value = "/tmp/orchard-assets";
+  await document.getElementById("setup-action-select").dispatch("change");
+  await app.reviewSetupPlan();
+  assert.equal(app.state.currentSetupPlan.id, "helper-plan");
+  document.getElementById("setup-source-revision").value = "abcd";
+  await document.getElementById("setup-source-revision").dispatch("input");
+  assert.equal(app.state.currentSetupPlan, null);
+  await app.reviewSetupPlan();
+  assert.equal(app.state.currentSetupPlan, null);
+  assert.equal(document.getElementById("run-setup-plan").disabled, true);
+  assert.equal(document.getElementById("setup-plan-status").textContent, "Helper replan failed.");
+});
+
+test("results are scoped to workspace and the selected project while legacy records stay explicitly unscoped", async () => {
+  const history = [
+    { id: "workspace", action: "tool-install", scope: "workspace", status: "succeeded", exitCode: 0 },
+    { id: "selected", action: "build", scope: "project", project: "Field Notes", projectLabel: "Field Notes", status: "succeeded", exitCode: 0 },
+    { id: "other", action: "build", scope: "project", project: "Other", projectLabel: "Other", status: "failed", exitCode: 1 },
+    { id: "legacy", action: "build", status: "failed", exitCode: 1 }
+  ];
+  const { app, document } = createHarness(async () => apiResponse(baseState({ history })));
+  await app.start();
+  const text = descendants(document.getElementById("result-list")).map((element) => element.textContent).join("\n");
+  assert.match(text, /Workspace setup/);
+  assert.match(text, /Field Notes · Field Notes/);
+  assert.match(text, /Legacy unscoped record/);
+  assert.doesNotMatch(text, /Other · Other/);
 });

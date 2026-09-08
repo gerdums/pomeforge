@@ -203,3 +203,50 @@ func TestCreationContextRejectsSymlinkDestination(t *testing.T) {
 		t.Fatal("symlink destination was accepted")
 	}
 }
+
+func TestCLIToolInstallPreviewAndSetupSchema(t *testing.T) {
+	code, stdout, stderr := runCLI(t, "tools", "install", "asc", "--json")
+	if code != 0 || stderr != "" {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	for _, expected := range []string{`"scope":"workspace"`, `"version":"5.0.0"`, `"downloadSize":`, `"sourceUrl":"https://github.com/`, `"operation":"verified-managed-install"`} {
+		if !strings.Contains(stdout, expected) {
+			t.Errorf("install preview missing %s: %s", expected, stdout)
+		}
+	}
+	code, stdout, _ = runCLI(t, "schema", "--json")
+	if code != 0 {
+		t.Fatal(stdout)
+	}
+	for _, expected := range []string{`"name":"sdk"`, `"inputPath"`, `"assetKitRevision"`, `"scope":"workspace"`} {
+		if !strings.Contains(stdout, expected) {
+			t.Errorf("schema missing %s", expected)
+		}
+	}
+}
+
+func TestCLIHelperRegistrationPreviewRetainsOnlySuppliedProvenance(t *testing.T) {
+	previous := defaultTools
+	t.Cleanup(func() { defaultTools = previous })
+	helper := filepath.Join(t.TempDir(), "orchard-assets")
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\nif [ \"$1\" = --help ]; then echo 'Usage: orchard-assets compile'; exit 0; fi\nexit 2\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := runCLI(t, "tools", "register", "orchard-assets", "--path", helper, "--json")
+	if code != 0 || stderr != "" {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, `"sha256"`) || strings.Contains(stdout, `"assetKitRevision":"e763`) || !strings.Contains(stdout, "will not infer provenance") {
+		t.Fatalf("unexpected registration preview: %s", stdout)
+	}
+}
+
+func TestCLIErrorEnvelopeRetainsCompletedOperationResult(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	command := &cli{json: true, stdout: &stdout, stderr: &stderr}
+	result := orchard.OperationResult{ID: "failed-result", Action: "sdk-import", Scope: "workspace", Status: "failed", ExitCode: 9, Output: "safe output"}
+	code := command.fail(orchard.ErrorWithResult("operation_failed", "operation failed", result), 3)
+	if code != 3 || stderr.Len() != 0 || !strings.Contains(stdout.String(), `"result":{"id":"failed-result"`) || !strings.Contains(stdout.String(), `"scope":"workspace"`) {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+}

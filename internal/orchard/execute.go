@@ -30,10 +30,11 @@ const (
 )
 
 type Executor struct {
-	Timeout   time.Duration
-	OutputCap int
-	HostOS    string
-	Workspace string
+	Timeout       time.Duration
+	OutputCap     int
+	HostOS        string
+	Workspace     string
+	XDGConfigHome string
 
 	mu      sync.Mutex
 	running map[string]bool
@@ -93,6 +94,39 @@ func ChildEnvironmentFor(adapter string) []string {
 	return result
 }
 
+func environmentWithXDGConfigHome(adapter, configHome string) []string {
+	environment := ChildEnvironmentFor(adapter)
+	if configHome == "" {
+		return environment
+	}
+	prefix := "XDG_CONFIG_HOME="
+	filtered := environment[:0]
+	for _, value := range environment {
+		if !strings.HasPrefix(value, prefix) {
+			filtered = append(filtered, value)
+		}
+	}
+	return append(filtered, prefix+configHome)
+}
+
+func effectiveXDGConfigHome() (string, error) {
+	if configured := os.Getenv("XDG_CONFIG_HOME"); configured != "" {
+		if !filepath.IsAbs(configured) {
+			return "", errors.New("XDG_CONFIG_HOME must be absolute for Swift SDK persistence")
+		}
+		clean := filepath.Clean(configured)
+		if clean == string(filepath.Separator) {
+			return "", errors.New("XDG_CONFIG_HOME may not be the filesystem root")
+		}
+		return clean, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || !filepath.IsAbs(home) {
+		return "", errors.New("resolve an absolute user home for Swift SDK persistence")
+	}
+	return filepath.Join(home, ".config"), nil
+}
+
 func (e *Executor) Execute(ctx context.Context, plan Plan, project string, confirm bool) (OperationResult, error) {
 	hostOS := e.HostOS
 	if hostOS == "" {
@@ -132,7 +166,7 @@ func (e *Executor) Execute(ctx context.Context, plan Plan, project string, confi
 	}
 
 	started := time.Now().UTC()
-	result := OperationResult{ID: operationID(), Action: plan.Action, Status: "succeeded", ExitCode: 0, StartedAt: started}
+	result := OperationResult{ID: operationID(), Action: plan.Action, Status: "succeeded", ExitCode: 0, StartedAt: started, Scope: "project", Project: plan.Project, ProjectLabel: plan.ProjectLabel}
 	output := &cappedBuffer{limit: e.OutputCap}
 	if output.limit <= 0 {
 		output.limit = 64 * 1024
@@ -149,7 +183,7 @@ func (e *Executor) Execute(ctx context.Context, plan Plan, project string, confi
 		stepCtx, cancel := context.WithTimeout(ctx, timeout)
 		cmd := exec.CommandContext(stepCtx, step.Executable, step.Args...)
 		cmd.Dir = step.Directory
-		cmd.Env = ChildEnvironmentFor(step.Tool)
+		cmd.Env = environmentWithXDGConfigHome(step.Tool, e.XDGConfigHome)
 		cmd.Stdout = output
 		cmd.Stderr = output
 		configureProcessGroup(cmd)

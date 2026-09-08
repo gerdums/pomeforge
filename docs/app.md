@@ -17,10 +17,15 @@ If the page reports a missing or expired session, close the tab and start `orcha
 ## What the workspace does
 
 - Selects or creates an xtool Swift package inside the configured workspace.
+- Opens **Prerequisites** even when the workspace has no projects. From there,
+  a person can preview and explicitly run a pinned tool install,
+  integrity-register an existing `orchard-assets` or `unxip` helper, inspect
+  SDK status, or import an operator-supplied Xcode.app/XIP. Setup input changes
+  invalidate the preview.
 - Displays the tool and capability diagnostics reported by Orchard, including missing, incompatible, limited, and unverified states.
 - Requests an operation plan and shows its executable, each exact argument boundary, working directory, blockers, and warnings.
 - Runs only the returned plan identifier. Operations marked as externally mutating require an explicit confirmation checkbox.
-- Displays actual process status, exit code, timestamps, and output, including actual output returned with a failed run. Refreshing diagnostics merges backend history with results from the current browser session by result ID, so a temporarily empty history response does not discard a completed run. An empty result log means that no retained runs were reported.
+- Displays actual process status, exit code, timestamps, and output, including actual output returned with a failed run. Setup completion remains visibly announced after its one-use plan is cleared and diagnostics refresh. Results identify project scope or workspace scope so a global setup result cannot be mistaken for a selected app. Refreshing diagnostics merges backend history with results from the current browser session by result ID, so a temporarily empty history response does not discard a completed run. An empty result log means that no retained runs were reported.
 
 Changing a project, action, IPA path, or device identifier invalidates the current plan. Tool installation links are shown only when Orchard reports a valid HTTPS URL. The application has no remote scripts, fonts, analytics, or frontend-only fixture mode.
 
@@ -50,7 +55,7 @@ The core process owns browser opening after a successful bind. The launcher does
 
 ## Prerequisites and limits
 
-The graphical workspace requires a Linux desktop browser and `xdg-open` for automatic opening. Orchard itself reports the status of xtool, Swift and its iOS SDK, ASC CLI, and USB/device support. Follow the HTTPS installation guidance displayed by diagnostics; the desktop installer deliberately does not install those upstream tools.
+The graphical workspace requires a Linux desktop browser and `xdg-open` for automatic opening. Orchard itself reports the status of xtool, Swift and its iOS SDK, ASC CLI, and USB/device support. The desktop binary installer deliberately does not install those upstream tools; use the graphical Prerequisites actions for supported managed installs and helper registration. Apple input and native prerequisites are described in [Linux setup and SDK import](setup.md).
 
 Apple Developer Program membership, credentials, signing authorization, compatible provisioning, device trust and Developer Mode, and App Store eligibility remain external prerequisites. A successful local plan is not evidence of a successful iOS build, device launch, TestFlight upload, or App Review submission.
 

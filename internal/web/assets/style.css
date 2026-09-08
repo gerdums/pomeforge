@@ -316,6 +316,7 @@ h3 { margin: 0; font-size: 15px; font-weight: 650; }
 .empty-state svg { width: 50px; fill: none; stroke: var(--green); stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
 .empty-state h2 { margin-top: 19px; font-size: 24px; }
 .empty-state p { margin: 9px 0 23px; color: var(--muted); }
+.empty-state .secondary-button { margin-left: 10px; }
 
 .work-layout { display: grid; gap: 46px; }
 .operation-panel, .plan-panel { min-width: 0; }
@@ -354,11 +355,26 @@ h3 { margin: 0; font-size: 15px; font-weight: 650; }
 
 .inline-status { margin: 0; color: var(--muted); font-size: 13px; }
 
+.setup-result-status:not(:empty) {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
 .plan-panel {
   padding-top: 42px;
   border-top: 1px solid var(--line);
   animation: plan-in var(--transition);
 }
+
+.setup-section { margin-top: 48px; padding-top: 42px; border-top: 1px solid var(--line); }
+.setup-card { padding: 24px 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.setup-grid { padding-right: 48px; }
+.setup-plan-panel { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--line); }
+.setup-plan-panel > h3 { margin: 0 48px 18px; font-size: 18px; }
+.setup-plan-panel .notice { margin-right: 48px; }
 
 @keyframes plan-in {
   from { opacity: 0; transform: translateY(6px); }
@@ -479,6 +495,7 @@ h3 { margin: 0; font-size: 15px; font-weight: 650; }
 .result-meta { display: flex; flex-wrap: wrap; gap: 9px 18px; padding: 10px 16px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
 .result-meta span { overflow-wrap: anywhere; }
 .log-output { margin: 0; padding: 15px 16px 18px; color: #d9d7cf; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.65; white-space: pre; }
+.result-metadata { margin: 0; padding: 12px 16px; overflow-x: auto; border-bottom: 1px solid var(--line); color: var(--green-bright); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; white-space: pre; }
 .empty-row { padding: 24px 2px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); }
 
 dialog {
@@ -532,6 +549,10 @@ dialog .field + .field { margin-top: 17px; }
   .view-header .secondary-button { justify-self: start; }
   .section-heading { grid-template-columns: 27px minmax(0, 1fr); gap: 9px; }
   .form-grid, .button-row, .plan-steps { margin-left: 0; padding-left: 0; }
+	.setup-grid { padding: 0 18px; }
+	.setup-plan-panel > h3 { margin-left: 18px; margin-right: 18px; }
+	.setup-plan-panel .notice { margin-right: 18px; margin-left: 18px; }
+	.setup-plan-panel .plan-steps, .setup-plan-panel .button-row, .setup-plan-panel .confirmation { margin-left: 18px; margin-right: 18px; }
   .form-grid { grid-template-columns: 1fr; }
   .full-field { grid-column: auto; }
   .notice, .confirmation { margin-left: 0; }

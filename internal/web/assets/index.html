@@ -84,6 +84,7 @@
           <h2>No projects yet</h2>
           <p>Create an xtool Swift package inside this workspace. Orchard will never overwrite an existing directory.</p>
           <button id="empty-create-project" class="primary-button" type="button">Create first project</button>
+          <button id="empty-open-setup" class="secondary-button" type="button">Set up tools first</button>
         </div>
 
         <div id="work-content" class="work-layout" hidden>
@@ -171,6 +172,82 @@
             <p id="tool-count" class="secondary"></p>
           </div>
           <div id="tool-list" class="diagnostic-list"></div>
+        </section>
+
+        <section class="setup-section" aria-labelledby="setup-title">
+          <div class="subsection-header">
+            <div>
+              <h2 id="setup-title">Setup operations</h2>
+              <p class="secondary">Review the exact workspace-scoped plan before any download, registration, extraction, or SDK install.</p>
+            </div>
+          </div>
+          <div class="setup-card">
+            <div class="form-grid setup-grid">
+              <div class="field full-field">
+                <label for="setup-action-select">Setup operation</label>
+                <select id="setup-action-select">
+                  <option value="">Choose a setup operation</option>
+                </select>
+              </div>
+              <div id="setup-tool-field" class="field full-field" hidden>
+                <label for="setup-tool-select">Pinned tool</label>
+                <select id="setup-tool-select">
+                  <option value="xtool">xtool</option>
+                  <option value="asc">ASC CLI</option>
+                  <option value="zsign">zsign</option>
+                </select>
+              </div>
+              <div id="setup-helper-field" class="field" hidden>
+                <label for="setup-helper-select">Helper</label>
+                <select id="setup-helper-select">
+                  <option value="orchard-assets">orchard-assets</option>
+                  <option value="unxip">unxip</option>
+                </select>
+              </div>
+              <div id="setup-helper-path-field" class="field" hidden>
+                <label for="setup-helper-path">Executable path</label>
+                <input id="setup-helper-path" type="text" autocomplete="off" placeholder="/absolute/path/orchard-assets">
+              </div>
+              <div id="setup-source-revision-field" class="field" hidden>
+                <label for="setup-source-revision">Source revision <span>optional</span></label>
+                <input id="setup-source-revision" type="text" autocomplete="off">
+              </div>
+              <div id="setup-assetkit-revision-field" class="field" hidden>
+                <label for="setup-assetkit-revision">AssetKit revision <span>optional</span></label>
+                <input id="setup-assetkit-revision" type="text" autocomplete="off">
+              </div>
+              <div id="setup-sdk-input-field" class="field" hidden>
+                <label for="setup-sdk-input">Xcode.app or XIP path</label>
+                <input id="setup-sdk-input" type="text" autocomplete="off" placeholder="/absolute/path/Xcode.app">
+              </div>
+              <div id="setup-sdk-arch-field" class="field" hidden>
+                <label for="setup-sdk-arch">Linux architecture</label>
+                <select id="setup-sdk-arch">
+				  <option value="">Choose architecture</option>
+                  <option value="x86_64">x86_64</option>
+                  <option value="arm64">arm64</option>
+                </select>
+              </div>
+            </div>
+            <div class="button-row">
+              <button id="review-setup-plan" class="primary-button" type="button" disabled>Review setup plan</button>
+              <p id="setup-plan-status" class="inline-status" aria-live="polite">Choose a setup operation.</p>
+            </div>
+            <div id="setup-plan-panel" class="setup-plan-panel" hidden>
+              <h3 id="setup-plan-title">Setup plan</h3>
+              <div id="setup-plan-blockers" class="notice notice-blocked" hidden><strong>Blocked</strong><ul id="setup-blocker-list"></ul></div>
+              <div id="setup-plan-warnings" class="notice notice-warning" hidden><strong>Warnings</strong><ul id="setup-warning-list"></ul></div>
+              <div id="setup-plan-steps" class="plan-steps"></div>
+              <label id="setup-confirmation-field" class="confirmation" hidden>
+                <input id="confirm-setup-execution" type="checkbox">
+                <span>I confirm this setup operation.</span>
+              </label>
+              <div class="button-row">
+                <button id="run-setup-plan" class="primary-button" type="button" disabled>Run setup operation</button>
+              </div>
+            </div>
+            <p id="setup-execution-status" class="inline-status setup-result-status" role="status" aria-live="polite"></p>
+          </div>
         </section>
 
         <section class="capability-section" aria-labelledby="capabilities-title">

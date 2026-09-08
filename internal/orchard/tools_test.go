@@ -44,6 +44,24 @@ func TestCapturedToolVersionClassification(t *testing.T) {
 	}
 }
 
+func TestToolProbePreservesMulticallInvocationName(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "swift-driver")
+	alias := filepath.Join(root, "swift")
+	contents := "#!/bin/sh\nif [ \"${0##*/}\" != swift ]; then printf 'invalid driver name: %s\\n' \"${0##*/}\" >&2; exit 1; fi\nprintf 'Swift version 6.3.3 (swift-6.3.3-RELEASE)\\n'\n"
+	if err := os.WriteFile(target, []byte(contents), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, alias); err != nil {
+		t.Fatal(err)
+	}
+	definition := toolDefinition{id: "swift", name: "Swift", executable: alias, versionArgs: []string{"--version"}, installURL: "https://example.invalid"}
+	status := (SystemToolResolver{Timeout: time.Second}).probeDefinition(context.Background(), definition)
+	if status.Status != "available" || status.Path != alias || status.CanonicalPath != target {
+		t.Fatalf("status = %#v", status)
+	}
+}
+
 func TestToolProbeKillsPipeHoldingDescendantAndRedactsDiagnostics(t *testing.T) {
 	path := probeScript(t, "(sleep 5) &\nexit 0")
 	definition := toolDefinition{id: "zsign", name: "zsign", executable: path, versionArgs: []string{"--version"}, installURL: "https://example.invalid"}

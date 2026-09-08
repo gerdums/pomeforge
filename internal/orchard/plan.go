@@ -27,21 +27,31 @@ const (
 )
 
 var actionCatalog = []ActionInfo{
-	{ID: "setup", Title: "Inspect setup", Description: "Inspect the installed Swift SDK setup and explain manual requirements.", Effect: "local-read"},
-	{ID: "build", Title: "Build debug app", Description: "Compile a debug device application with xtool.", Effect: "local-build"},
-	{ID: "devices", Title: "List devices", Description: "Enumerate connected devices without waiting.", Effect: "device-read"},
-	{ID: "install", Title: "Install on device", Description: "Provision/development-sign and install an IPA, or build and run a debug app on a selected device.", Effect: "device-write", RequiresConfirmation: true},
-	{ID: "launch", Title: "Launch on device", Description: "Launch the project bundle identifier on a selected device.", Effect: "device-write"},
-	{ID: "export", Title: "Export unsigned IPA", Description: "Produce an unsigned release-workflow IPA; this is not App Store distribution signing.", Effect: "local-build"},
-	{ID: "store-status", Title: "Inspect store build", Description: "Read App Store Connect build status for the configured build ID.", Effect: "account-read"},
-	{ID: "validate", Title: "Validate store readiness", Description: "Run ASC's remote App Store version readiness validation.", Effect: "account-read"},
-	{ID: "upload", Title: "Upload IPA", Description: "Upload a pre-exported, correctly distribution-signed IPA to App Store Connect.", Effect: "account-write", RequiresConfirmation: true},
-	{ID: "submit", Title: "Submit for review", Description: "Dry-run and then submit a configured build for App Review.", Effect: "account-write", RequiresConfirmation: true},
+	{ID: "tool-install", Title: "Install pinned tool", Description: "Download, verify, and activate one checksum-pinned Linux tool in private user state.", Effect: "local-write", Scope: "workspace", Parameters: []ActionParameter{{Name: "tool", Type: "enum", Required: true, Description: "Pinned catalog tool ID.", Values: []string{"xtool", "asc", "zsign"}}}},
+	{ID: "helper-register", Title: "Register helper", Description: "Validate and register an existing orchard-assets or unxip executable with an integrity digest.", Effect: "local-write", Scope: "workspace", Parameters: []ActionParameter{{Name: "helper", Type: "enum", Required: true, Description: "Helper executable contract.", Values: []string{"orchard-assets", "unxip"}}, {Name: "executablePath", Type: "absolute-path", Required: true, Description: "Existing executable to hash and probe."}, {Name: "sourceRevision", Type: "string", Description: "Known source revision; never inferred."}, {Name: "assetKitRevision", Type: "string", Description: "Known AssetKit revision for orchard-assets; never inferred."}}},
+	{ID: "sdk-status", Title: "Inspect SDK status", Description: "Inspect xtool's actual Darwin SDK status output.", Effect: "local-read", Scope: "workspace"},
+	{ID: "sdk-import", Title: "Import Apple SDK", Description: "Build and install a Darwin SDK from an operator-supplied Xcode.app or XIP on Linux.", Effect: "local-write", Scope: "workspace", Parameters: []ActionParameter{{Name: "inputPath", Type: "absolute-path", Required: true, Description: "Operator-supplied Xcode.app or XIP."}, {Name: "arch", Type: "enum", Required: true, Description: "Linux host SDK architecture.", Values: []string{"arm64", "x86_64"}}}},
+	{ID: "setup", Title: "Inspect setup", Description: "Inspect the installed Swift SDK setup and explain manual requirements.", Effect: "local-read", Scope: "project"},
+	{ID: "build", Title: "Build debug app", Description: "Compile a debug device application with xtool.", Effect: "local-build", Scope: "project"},
+	{ID: "devices", Title: "List devices", Description: "Enumerate connected devices without waiting.", Effect: "device-read", Scope: "project"},
+	{ID: "install", Title: "Install on device", Description: "Provision/development-sign and install an IPA, or build and run a debug app on a selected device.", Effect: "device-write", RequiresConfirmation: true, Scope: "project"},
+	{ID: "launch", Title: "Launch on device", Description: "Launch the project bundle identifier on a selected device.", Effect: "device-write", Scope: "project"},
+	{ID: "export", Title: "Export unsigned IPA", Description: "Produce an unsigned release-workflow IPA; this is not App Store distribution signing.", Effect: "local-build", Scope: "project"},
+	{ID: "store-status", Title: "Inspect store build", Description: "Read App Store Connect build status for the configured build ID.", Effect: "account-read", Scope: "project"},
+	{ID: "validate", Title: "Validate store readiness", Description: "Run ASC's remote App Store version readiness validation.", Effect: "account-read", Scope: "project"},
+	{ID: "upload", Title: "Upload IPA", Description: "Upload a pre-exported, correctly distribution-signed IPA to App Store Connect.", Effect: "account-write", RequiresConfirmation: true, Scope: "project"},
+	{ID: "submit", Title: "Submit for review", Description: "Dry-run and then submit a configured build for App Review.", Effect: "account-write", RequiresConfirmation: true, Scope: "project"},
 }
 
 func Actions() []ActionInfo {
 	result := make([]ActionInfo, len(actionCatalog))
-	copy(result, actionCatalog)
+	for index, action := range actionCatalog {
+		action.Parameters = append([]ActionParameter(nil), action.Parameters...)
+		for parameterIndex := range action.Parameters {
+			action.Parameters[parameterIndex].Values = append([]string(nil), action.Parameters[parameterIndex].Values...)
+		}
+		result[index] = action
+	}
 	return result
 }
 
@@ -55,9 +65,10 @@ func actionByID(id string) (ActionInfo, bool) {
 }
 
 type Planner struct {
-	Workspace string
-	Tools     ToolResolver
-	HostOS    string
+	Workspace     string
+	Tools         ToolResolver
+	HostOS        string
+	XDGConfigHome string
 }
 
 func (p Planner) Plan(ctx context.Context, input PlanInput) (Plan, error) {
@@ -89,8 +100,12 @@ func (p Planner) Plan(ctx context.Context, input PlanInput) (Plan, error) {
 	}
 	plan := Plan{
 		Action: input.Action, Title: action.Title, Steps: []Step{}, Blockers: []string{}, Warnings: []string{},
-		RequiresConfirmation: action.RequiresConfirmation, Effect: action.Effect,
+		RequiresConfirmation: action.RequiresConfirmation, Effect: action.Effect, Scope: action.Scope,
 	}
+	if relative, relErr := filepath.Rel(p.Workspace, project); relErr == nil {
+		plan.Project = filepath.ToSlash(relative)
+	}
+	plan.ProjectLabel = manifest.Name
 	hostOS := p.HostOS
 	if hostOS == "" {
 		hostOS = runtime.GOOS
@@ -106,13 +121,13 @@ func (p Planner) Plan(ctx context.Context, input PlanInput) (Plan, error) {
 			plan.Blockers = append(plan.Blockers, fmt.Sprintf("%s is %s: %s (install: %s)", status.Name, status.Status, status.Detail, status.InstallURL))
 			return
 		}
-		plan.Steps = append(plan.Steps, Step{Tool: tool, Executable: status.Path, Args: args, Directory: project, Description: description})
+		plan.Steps = append(plan.Steps, Step{Kind: "process", Tool: tool, Executable: status.Path, Args: args, Directory: project, Description: description})
 	}
 	switch input.Action {
 	case "setup":
 		addToolStep("swift", "Inspect the installed Swift compiler.", "--version")
 		addToolStep("xtool", "Inspect the installed Darwin Swift SDK.", "sdk", "status")
-		plan.Warnings = append(plan.Warnings, "Installing the iOS SDK requires a user-supplied Xcode.xip and an explicit `xtool sdk install /path/Xcode.xip`; Orchard does not download Apple SDKs.")
+		plan.Warnings = append(plan.Warnings, "SDK import requires an operator-supplied Xcode.app or XIP through `orchard sdk import`; Orchard does not download Apple SDKs or replace an installed SDK.")
 	case "build":
 		addToolStep("swift", "Verify Swift before building.", "--version")
 		addToolStep("xtool", "Build the debug device application.", "dev", "build", "--configuration", "debug")
@@ -191,8 +206,11 @@ func (p Planner) Plan(ctx context.Context, input PlanInput) (Plan, error) {
 		RequiresConfirmation bool
 		Executable           bool
 		Effect               string
+		Scope                string
+		Project              string
+		ProjectLabel         string
 		Fingerprint          string
-	}{plan.Action, plan.Title, plan.Steps, plan.Blockers, plan.Warnings, plan.RequiresConfirmation, plan.Executable, plan.Effect, fingerprint}
+	}{plan.Action, plan.Title, plan.Steps, plan.Blockers, plan.Warnings, plan.RequiresConfirmation, plan.Executable, plan.Effect, plan.Scope, plan.Project, plan.ProjectLabel, fingerprint}
 	encoded, _ := json.Marshal(idPayload)
 	sum := sha256.Sum256(encoded)
 	plan.ID = hex.EncodeToString(sum[:12])
@@ -229,6 +247,7 @@ func (p Planner) fingerprint(ctx context.Context, project string, input PlanInpu
 	writeFingerprintRecord(h, "schema", []byte("orchard-plan-v3"))
 	encodedInput, _ := json.Marshal(input)
 	writeFingerprintRecord(h, "input", encodedInput)
+	writeFingerprintRecord(h, "xdg-config-home", []byte(p.XDGConfigHome))
 	var projectBytes int64
 	selectedIPA := ""
 	if input.IPA != "" {
@@ -282,9 +301,17 @@ func (p Planner) fingerprint(ctx context.Context, project string, input PlanInpu
 		status := canonicalToolStatus(p.Tools.Probe(ctx, id))
 		encoded, _ := json.Marshal(status)
 		writeFingerprintRecord(h, "tool-status", []byte(id), encoded)
-		if status.Path != "" {
-			file, openErr := openRegularAbsolute(status.Path)
+		if status.Status == "available" && status.Path == "" {
+			return "", fmt.Errorf("fingerprint %s executable: available tool has no invocation path", id)
+		}
+		if status.CanonicalPath != "" {
+			file, openErr := openRegularAbsolute(status.CanonicalPath)
 			if openErr == nil {
+				openedInfo, statErr := file.Stat()
+				if statErr != nil || !openedInfo.Mode().IsRegular() || openedInfo.Mode().Perm()&0o111 == 0 {
+					_ = file.Close()
+					return "", fmt.Errorf("fingerprint %s executable: canonical target is not a regular executable file", id)
+				}
 				var toolBytes int64
 				digest, size, copyErr := digestBounded(ctx, file, maxToolFingerprintBytes, &toolBytes, maxToolFingerprintBytes)
 				closeErr := file.Close()
@@ -294,9 +321,20 @@ func (p Planner) fingerprint(ctx context.Context, project string, input PlanInpu
 				if closeErr != nil {
 					return "", closeErr
 				}
-				writeFingerprintRecord(h, "tool-file", []byte(id), []byte(status.Path), encodeFingerprintSize(size), digest)
-			} else if _, statErr := os.Lstat(status.Path); statErr == nil {
+				if current := canonicalToolStatus(ToolStatus{Path: status.Path}).CanonicalPath; current != status.CanonicalPath {
+					return "", fmt.Errorf("fingerprint %s executable: symlink mapping changed while hashing", id)
+				}
+				writeFingerprintRecord(h, "tool-file", []byte(id), []byte(status.Path), []byte(status.CanonicalPath), encodeFingerprintSize(size), digest)
+			} else if status.Status == "available" {
 				return "", fmt.Errorf("fingerprint %s executable: %w", id, openErr)
+			} else if _, statErr := os.Lstat(status.CanonicalPath); statErr == nil {
+				return "", fmt.Errorf("fingerprint %s executable: %w", id, openErr)
+			}
+		} else if status.Path != "" {
+			if status.Status == "available" {
+				return "", fmt.Errorf("fingerprint %s executable: path does not resolve to a canonical regular file", id)
+			} else if _, statErr := os.Lstat(status.Path); statErr == nil {
+				return "", fmt.Errorf("fingerprint %s executable: path does not resolve to a canonical regular file", id)
 			}
 		}
 	}
@@ -339,9 +377,17 @@ func digestBounded(ctx context.Context, source *os.File, perFileLimit int64, tot
 }
 
 func canonicalToolStatus(status ToolStatus) ToolStatus {
+	// A production resolver records the target it actually probed. Keep that
+	// identity so a retarget between probing and fingerprinting is detectable.
+	if status.CanonicalPath != "" {
+		return status
+	}
 	if status.Path != "" {
 		if resolved, err := filepath.EvalSymlinks(status.Path); err == nil {
-			status.Path = resolved
+			resolved = filepath.Clean(resolved)
+			if filepath.IsAbs(resolved) {
+				status.CanonicalPath = resolved
+			}
 		}
 	}
 	return status

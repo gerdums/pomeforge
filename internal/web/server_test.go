@@ -37,9 +37,13 @@ func (f webTools) ProbeAll(ctx context.Context) []orchard.ToolStatus {
 func testAPI(t *testing.T) (*httptest.Server, *API, string) {
 	t.Helper()
 	workspace := t.TempDir()
+	executable := filepath.Join(t.TempDir(), "tool-fixture")
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	tools := webTools{}
 	for _, id := range []string{"xtool", "swift", "asc"} {
-		tools[id] = orchard.ToolStatus{ID: id, Name: id, Status: "available", Version: "test", Path: "/test/" + id, Detail: "test"}
+		tools[id] = orchard.ToolStatus{ID: id, Name: id, Status: "available", Version: "test", Path: executable, Detail: "test"}
 	}
 	service, err := orchard.NewService(workspace, tools)
 	if err != nil {
@@ -429,5 +433,45 @@ func TestJSONEnvelopeShape(t *testing.T) {
 	writeData(recorder, http.StatusOK, map[string]string{"value": "ok"})
 	if !bytes.Contains(recorder.Body.Bytes(), []byte(`"ok":true`)) || bytes.Contains(recorder.Body.Bytes(), []byte(`"error"`)) {
 		t.Fatalf("unexpected success envelope: %s", recorder.Body.Bytes())
+	}
+}
+
+func TestAPIPlansWorkspaceSetupWithoutAProjectAndStrictlyValidatesFields(t *testing.T) {
+	server, _, _ := testAPI(t)
+	response := request(t, server, http.MethodPost, "/api/plan", `{"action":"tool-install","tool":"asc"}`, "test-token", "")
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("workspace plan status=%d body=%s", response.StatusCode, body)
+	}
+	var envelope struct {
+		Data orchard.Plan `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if envelope.Data.Scope != "workspace" || envelope.Data.ToolInstall == nil || envelope.Data.Steps[0].Kind != "internal" || envelope.Data.Steps[0].Executable != "" {
+		t.Fatalf("unexpected workspace plan: %#v", envelope.Data)
+	}
+	for _, body := range []string{
+		`{"action":"tool-install","tool":"asc","project":"Demo"}`,
+		`{"action":"sdk-import","inputPath":"relative/Xcode.app","arch":"x86_64"}`,
+		`{"action":"helper-register","helper":"unxip","executablePath":"/tmp/unxip","assetKitRevision":"e763558b55fcbb5a443b1d7b2c6f0972d8bd14f7"}`,
+		`{"action":"build","project":"Demo","tool":"asc"}`,
+	} {
+		response = request(t, server, http.MethodPost, "/api/plan", body, "test-token", "")
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("invalid body %s status=%d", body, response.StatusCode)
+		}
+		_ = response.Body.Close()
+	}
+}
+
+func TestAPIErrorEnvelopeIncludesCompletedResult(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	result := orchard.OperationResult{ID: "result-1", Action: "sdk-import", Status: "failed", ExitCode: 9, Scope: "workspace", Output: "bounded failure"}
+	writeError(recorder, http.StatusUnprocessableEntity, orchard.ErrorWithResult("operation_failed", "operation failed", result))
+	if !bytes.Contains(recorder.Body.Bytes(), []byte(`"result":{"id":"result-1"`)) || !bytes.Contains(recorder.Body.Bytes(), []byte(`"scope":"workspace"`)) {
+		t.Fatalf("result-bearing error envelope = %s", recorder.Body.Bytes())
 	}
 }

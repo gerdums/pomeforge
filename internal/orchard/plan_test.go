@@ -31,10 +31,16 @@ func (f fakeTools) ProbeAll(ctx context.Context) []ToolStatus {
 	return result
 }
 
-func availableTools() fakeTools {
+func availableTools(t *testing.T) fakeTools {
+	t.Helper()
+	root := t.TempDir()
 	result := fakeTools{}
 	for _, id := range []string{"xtool", "swift", "asc", "zsign", "idevice_id", "usbmuxd"} {
-		result[id] = ToolStatus{ID: id, Name: id, Status: "available", Version: "test 1.0", Path: "/test/bin/" + id, Detail: "test", InstallURL: "https://example.invalid"}
+		path := filepath.Join(root, id)
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		result[id] = ToolStatus{ID: id, Name: id, Status: "available", Version: "test 1.0", Path: path, Detail: "test", InstallURL: "https://example.invalid"}
 	}
 	return result
 }
@@ -73,7 +79,7 @@ func TestVerifiedPlanCommands(t *testing.T) {
 	if err := os.WriteFile(ipa, []byte("fixture"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	planner := Planner{Workspace: workspace, Tools: availableTools()}
+	planner := Planner{Workspace: workspace, Tools: availableTools(t)}
 	tests := []struct {
 		action  string
 		input   PlanInput
@@ -98,6 +104,9 @@ func TestVerifiedPlanCommands(t *testing.T) {
 			}
 			if !plan.Executable {
 				t.Fatalf("unexpected blockers: %v", plan.Blockers)
+			}
+			if plan.Scope != "project" || plan.Project != "Demo" || plan.ProjectLabel != "Demo" {
+				t.Fatalf("project scope was not bound truthfully: %#v", plan)
 			}
 			if plan.RequiresConfirmation != test.confirm {
 				t.Errorf("confirmation = %t", plan.RequiresConfirmation)
@@ -128,7 +137,7 @@ func TestPlanIdentityIncludesSkippedDirectoryIPAAndStoredPlanGoesStale(t *testin
 	if err := os.WriteFile(ipa, []byte("same-one"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewService(workspace, availableTools())
+	service, err := NewService(workspace, availableTools(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +159,7 @@ func TestPlanRejectsSpecialAndOversizedProjectFilesWithoutBlocking(t *testing.T)
 	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	planner := Planner{Workspace: workspace, Tools: availableTools()}
+	planner := Planner{Workspace: workspace, Tools: availableTools(t)}
 	started := time.Now()
 	if _, err := planner.Plan(context.Background(), PlanInput{Action: "build", Project: project}); err == nil || !strings.Contains(err.Error(), "nonregular") {
 		t.Fatalf("expected FIFO rejection, got %v", err)
@@ -182,7 +191,7 @@ func TestPlanBindsExecutableBytesAndEnforcesLinuxPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	info, _ := os.Stat(executable)
-	tools := availableTools()
+	tools := availableTools(t)
 	tools["xtool"] = ToolStatus{ID: "xtool", Name: "xtool", Status: "available", Version: "xtool 1.19.0", Path: executable, Detail: "fixture"}
 	planner := Planner{Workspace: workspace, Tools: tools}
 	first, err := planner.Plan(context.Background(), PlanInput{Action: "devices", Project: project})
@@ -211,13 +220,81 @@ func TestPlanBindsExecutableBytesAndEnforcesLinuxPolicy(t *testing.T) {
 	}
 }
 
+func TestPlanRejectsAvailableToolWithoutCanonicalBytes(t *testing.T) {
+	workspace, project := testProject(t, AppStoreIDs{})
+	tools := availableTools(t)
+	status := tools["xtool"]
+	status.Path = filepath.Join(t.TempDir(), "vanished-xtool")
+	tools["xtool"] = status
+	if _, err := (Planner{Workspace: workspace, Tools: tools}).Plan(context.Background(), PlanInput{Action: "devices", Project: project}); err == nil || !strings.Contains(err.Error(), "canonical regular file") {
+		t.Fatalf("available tool without canonical bytes was accepted: %v", err)
+	}
+}
+
+func TestStoredPlanPreservesMulticallAliasAndRejectsRetarget(t *testing.T) {
+	root := t.TempDir()
+	bin := filepath.Join(root, "bin")
+	if err := os.Mkdir(bin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	driverContents := []byte("#!/bin/sh\nif [ \"${0##*/}\" != swift ]; then printf 'invalid driver name: %s\\n' \"${0##*/}\" >&2; exit 1; fi\nprintf 'Swift version 6.3.3 (swift-6.3.3-RELEASE)\\n'\n")
+	firstTarget := filepath.Join(root, "swift-driver-first")
+	secondTarget := filepath.Join(root, "swift-driver-second")
+	for _, target := range []string{firstTarget, secondTarget} {
+		if err := os.WriteFile(target, driverContents, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	swiftAlias := filepath.Join(bin, "swift")
+	if err := os.Symlink(firstTarget, swiftAlias); err != nil {
+		t.Fatal(err)
+	}
+	xtool := filepath.Join(bin, "xtool")
+	if err := os.WriteFile(xtool, []byte("#!/bin/sh\nif [ \"$1\" = --version ]; then printf 'xtool 1.19.0\\n'; fi\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	workspace, project := testProject(t, AppStoreIDs{})
+	paths := setupPaths(filepath.Join(root, "managed"))
+	resolver := &IntegratedToolResolver{Paths: paths, StateDir: filepath.Join(root, "state"), HostOS: "linux", HostArch: "amd64", XDGConfigHome: filepath.Join(root, "config")}
+	service, err := NewService(workspace, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := PlanInput{Action: "build", Project: project}
+	plan, err := service.PlanOperation(context.Background(), input, true)
+	if err != nil || !plan.Executable {
+		t.Fatalf("plan=%#v err=%v", plan, err)
+	}
+	if len(plan.Steps) < 1 || plan.Steps[0].Executable != swiftAlias {
+		t.Fatalf("Swift invocation path was not preserved: %#v", plan.Steps)
+	}
+	if result, err := service.RunStored(context.Background(), plan.ID, false); err != nil || result.Status != "succeeded" {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+
+	plan, err = service.PlanOperation(context.Background(), input, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(swiftAlias); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secondTarget, swiftAlias); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RunStored(context.Background(), plan.ID, false); err == nil || !strings.Contains(err.Error(), "changed") {
+		t.Fatalf("same-byte alias retarget did not stale the plan: %v", err)
+	}
+}
+
 func TestStoredPlanIsConsumedAfterAttemptAndDuringConcurrentRun(t *testing.T) {
 	workspace, project := testProject(t, AppStoreIDs{})
 	executable := filepath.Join(workspace, "xtool-fixture")
 	if err := os.WriteFile(executable, []byte("#!/bin/sh\nsleep 0.15\nexit 7\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	tools := availableTools()
+	tools := availableTools(t)
 	tools["xtool"] = ToolStatus{ID: "xtool", Name: "xtool", Status: "available", Path: executable, Detail: "fixture"}
 	service, err := NewService(workspace, tools)
 	if err != nil {
@@ -277,7 +354,7 @@ func TestBlockedPlanAndStalePlan(t *testing.T) {
 	if blocked.Executable || len(blocked.Blockers) < 2 {
 		t.Fatalf("expected honest blockers, got %#v", blocked)
 	}
-	service, err = NewService(workspace, availableTools())
+	service, err = NewService(workspace, availableTools(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +380,7 @@ func TestPlanIdentityIncludesIPAContent(t *testing.T) {
 	if err := os.WriteFile(ipa, []byte("one"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	planner := Planner{Workspace: workspace, Tools: availableTools()}
+	planner := Planner{Workspace: workspace, Tools: availableTools(t)}
 	first, err := planner.Plan(context.Background(), PlanInput{Action: "upload", Project: project, IPA: ipa})
 	if err != nil {
 		t.Fatal(err)
@@ -337,7 +414,7 @@ func TestPlanFingerprintFramesProjectFileRecords(t *testing.T) {
 	if err := os.WriteFile(secondPath, []byte("B"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	planner := Planner{Workspace: workspace, Tools: availableTools()}
+	planner := Planner{Workspace: workspace, Tools: availableTools(t)}
 	first, err := planner.Plan(context.Background(), PlanInput{Action: "build", Project: project})
 	if err != nil {
 		t.Fatal(err)
@@ -376,7 +453,7 @@ func TestProjectLocalSelectedIPALargerThanSourceLimitUsesIPALimit(t *testing.T) 
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	plan, err := (Planner{Workspace: workspace, Tools: availableTools()}).Plan(context.Background(), PlanInput{Action: "upload", Project: project, IPA: ipa})
+	plan, err := (Planner{Workspace: workspace, Tools: availableTools(t)}).Plan(context.Background(), PlanInput{Action: "upload", Project: project, IPA: ipa})
 	if err != nil {
 		t.Fatalf("selected project-local IPA was constrained as source: %v", err)
 	}
@@ -464,7 +541,7 @@ func TestPlanRejectsProjectSymlink(t *testing.T) {
 	if err := os.Symlink(filepath.Join(project, "Package.swift"), filepath.Join(project, "linked.swift")); err != nil {
 		t.Fatal(err)
 	}
-	planner := Planner{Workspace: workspace, Tools: availableTools()}
+	planner := Planner{Workspace: workspace, Tools: availableTools(t)}
 	if _, err := planner.Plan(context.Background(), PlanInput{Action: "build", Project: project}); err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("expected project symlink rejection, got %v", err)
 	}
@@ -474,7 +551,7 @@ func TestPlanFingerprintHonorsCanceledContext(t *testing.T) {
 	workspace, project := testProject(t, AppStoreIDs{})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := (Planner{Workspace: workspace, Tools: availableTools()}).Plan(ctx, PlanInput{Action: "build", Project: project}); !errors.Is(err, context.Canceled) {
+	if _, err := (Planner{Workspace: workspace, Tools: availableTools(t)}).Plan(ctx, PlanInput{Action: "build", Project: project}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled fingerprint returned %v", err)
 	}
 }

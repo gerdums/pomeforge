@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -27,6 +28,7 @@ type toolDefinition struct {
 var toolDefinitions = []toolDefinition{
 	{id: "xtool", name: "xtool", executable: "xtool", versionArgs: []string{"--version"}, installURL: "https://github.com/xtool-org/xtool/releases/tag/1.19.0"},
 	{id: "swift", name: "Swift", executable: "swift", versionArgs: []string{"--version"}, installURL: "https://www.swift.org/install/linux/"},
+	{id: "clang", name: "Clang", executable: "clang", versionArgs: []string{"--version"}, installURL: "https://www.swift.org/install/linux/"},
 	{id: "asc", name: "ASC CLI", executable: "asc", versionArgs: []string{"--version"}, installURL: "https://github.com/rorkai/App-Store-Connect-CLI/releases/tag/5.0.0"},
 	{id: "zsign", name: "zsign", executable: "zsign", versionArgs: []string{"--version"}, installURL: "https://github.com/zhlynn/zsign/releases/tag/v1.1.2"},
 	{id: "idevice_id", name: "libimobiledevice", executable: "idevice_id", versionArgs: []string{"--version"}, installURL: "https://libimobiledevice.org/"},
@@ -34,7 +36,8 @@ var toolDefinitions = []toolDefinition{
 }
 
 type SystemToolResolver struct {
-	Timeout time.Duration
+	Timeout       time.Duration
+	XDGConfigHome string
 }
 
 func (r SystemToolResolver) ProbeAll(ctx context.Context) []ToolStatus {
@@ -69,10 +72,20 @@ func (r SystemToolResolver) probeDefinition(ctx context.Context, definition tool
 	if absolute, absErr := filepath.Abs(path); absErr == nil {
 		path = absolute
 	}
-	if resolved, resolveErr := filepath.EvalSymlinks(path); resolveErr == nil {
-		path = resolved
-	}
 	status.Path = path
+	status = canonicalToolStatus(status)
+	if status.CanonicalPath == "" {
+		status.Status = "unverified"
+		status.Detail = "executable path could not be resolved to a canonical regular file"
+		return status
+	}
+	info, err := os.Lstat(status.CanonicalPath)
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o111 == 0 {
+		status.Status = "unverified"
+		status.Detail = "executable path did not resolve to a regular executable file"
+		return status
+	}
+	canonicalPath := status.CanonicalPath
 	timeout := r.Timeout
 	if timeout <= 0 {
 		timeout = 4 * time.Second
@@ -81,13 +94,18 @@ func (r SystemToolResolver) probeDefinition(ctx context.Context, definition tool
 	defer cancel()
 	var output cappedBuffer
 	output.limit = 4096
-	cmd := exec.CommandContext(probeCtx, path, definition.versionArgs...)
-	cmd.Env = ChildEnvironmentFor(EnvironmentProbe)
+	cmd := exec.CommandContext(probeCtx, status.Path, definition.versionArgs...)
+	cmd.Env = environmentWithXDGConfigHome(EnvironmentProbe, r.XDGConfigHome)
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 	configureProcessGroup(cmd)
 	err = cmd.Run()
 	killProcessGroup(cmd)
+	if current := canonicalToolStatus(ToolStatus{Path: status.Path}).CanonicalPath; current != canonicalPath {
+		status.Status = "unverified"
+		status.Detail = "executable symlink mapping changed during its version probe"
+		return status
+	}
 	version := strings.TrimSpace(redactOutput(output.String()))
 	version = strings.Join(strings.Fields(version), " ")
 	if len(version) > 240 {

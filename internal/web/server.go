@@ -152,9 +152,41 @@ func (a *API) plan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if input.Project == "" || filepath.IsAbs(input.Project) || (input.IPA != "" && filepath.IsAbs(input.IPA)) {
-		writeError(w, http.StatusBadRequest, orchard.Errorf("invalid_path", "API project and IPA paths must be relative to the workspace"))
+	workspaceAction := false
+	actionKnown := false
+	for _, action := range orchard.Actions() {
+		if action.ID == input.Action {
+			actionKnown = true
+			workspaceAction = action.Scope == "workspace"
+			break
+		}
+	}
+	if !actionKnown {
+		writeError(w, http.StatusBadRequest, orchard.Errorf("unknown_action", "unknown action: "+input.Action))
 		return
+	}
+	if workspaceAction {
+		if input.Project != "" || input.IPA != "" || input.Device != "" {
+			writeError(w, http.StatusBadRequest, orchard.Errorf("invalid_input", "workspace setup actions do not accept project, IPA, or device fields"))
+			return
+		}
+		if input.ExecutablePath != "" && !filepath.IsAbs(input.ExecutablePath) {
+			writeError(w, http.StatusBadRequest, orchard.Errorf("invalid_path", "helper executablePath must be absolute"))
+			return
+		}
+		if input.InputPath != "" && !filepath.IsAbs(input.InputPath) {
+			writeError(w, http.StatusBadRequest, orchard.Errorf("invalid_path", "SDK inputPath must be absolute"))
+			return
+		}
+	} else {
+		if input.Project == "" || filepath.IsAbs(input.Project) || (input.IPA != "" && filepath.IsAbs(input.IPA)) {
+			writeError(w, http.StatusBadRequest, orchard.Errorf("invalid_path", "API project and IPA paths must be relative to the workspace"))
+			return
+		}
+		if input.Tool != "" || input.Helper != "" || input.ExecutablePath != "" || input.SourceRevision != "" || input.AssetKitRevision != "" || input.InputPath != "" || input.Arch != "" {
+			writeError(w, http.StatusBadRequest, orchard.Errorf("invalid_input", "project actions do not accept setup fields"))
+			return
+		}
 	}
 	plan, err := a.Service.PlanOperation(r.Context(), input, true)
 	if err != nil {
@@ -255,10 +287,13 @@ func writeError(w http.ResponseWriter, status int, err error) {
 
 func statusFor(err error) int {
 	var coded *orchard.CodedError
-	if !errors.As(err, &coded) {
+	code := ""
+	if errors.As(err, &coded) {
+		code = coded.Code
+	} else {
 		return http.StatusInternalServerError
 	}
-	switch coded.Code {
+	switch code {
 	case "unauthorized":
 		return http.StatusUnauthorized
 	case "already_exists", "stale_plan", "operation_in_progress":

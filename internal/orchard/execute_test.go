@@ -34,6 +34,8 @@ func TestProcessHelper(t *testing.T) {
 		fmt.Fprint(os.Stdout, strings.Repeat("x", 4096))
 	case "secret":
 		fmt.Fprint(os.Stdout, "Authorization: Bearer abc.def.secret token=supersecrettoken")
+	case "xdg-config":
+		fmt.Fprint(os.Stdout, os.Getenv("XDG_CONFIG_HOME"))
 	case "long-secret":
 		fmt.Fprint(os.Stdout, strings.Repeat("safe", 40)+"-----BEGIN PRIVATE KEY-----\n"+strings.Repeat("synthetic-private-material", 200)+"\n-----END PRIVATE KEY-----")
 	case "break-history":
@@ -187,6 +189,18 @@ func TestChildEnvironmentIsNarrow(t *testing.T) {
 	probeEnvironment := strings.Join(ChildEnvironmentFor(EnvironmentProbe), "\n")
 	if strings.Contains(probeEnvironment, "ASC_CONFIG_PATH") {
 		t.Fatal("credential-free metadata probe inherited ASC configuration")
+	}
+}
+
+func TestExecutorPinsSwiftSDKConfigHome(t *testing.T) {
+	project := t.TempDir()
+	configHome := filepath.Join(t.TempDir(), "swift-config")
+	result, err := (&Executor{Timeout: time.Second, XDGConfigHome: configHome}).Execute(context.Background(), helperPlan(project, "xdg-config"), project, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Output, configHome) {
+		t.Fatalf("project process did not receive pinned XDG_CONFIG_HOME: %q", result.Output)
 	}
 }
 
