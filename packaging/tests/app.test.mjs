@@ -5,6 +5,7 @@ import vm from "node:vm";
 
 const source = await readFile(new URL("../../internal/web/assets/app.js", import.meta.url), "utf8");
 const html = await readFile(new URL("../../internal/web/assets/index.html", import.meta.url), "utf8");
+const style = await readFile(new URL("../../internal/web/assets/style.css", import.meta.url), "utf8");
 const context = vm.createContext({ URL, URLSearchParams });
 vm.runInContext(source, context, { filename: "app.js" });
 const { createApp, readSessionToken, safeHttpsUrl } = context.OrchardWorkspace;
@@ -115,6 +116,12 @@ function apiResponse(data, status = 200) {
   return { ok: status >= 200 && status < 300, status, async json() { return { ok: true, data }; } };
 }
 
+function apiError(message, result, status = 500) {
+  const error = { code: "operation_failed", message };
+  if (result !== undefined) error.result = result;
+  return { ok: false, status, async json() { return { ok: false, error }; } };
+}
+
 function baseState(overrides = {}) {
   return {
     version: "0.1.0",
@@ -144,6 +151,12 @@ test("static entrypoint is self-contained and supplies every scripted element", 
   assert.match(html, /src="\/app\.js"/);
   const referencedIds = [...source.matchAll(/elements\["([a-z0-9-]+)"\]/g)].map((match) => match[1]);
   for (const id of new Set(referencedIds)) assert.match(html, new RegExp(`id="${id}"`), `missing #${id}`);
+});
+
+test("the hidden attribute overrides authored layout display rules", () => {
+  assert.match(style, /\[hidden\]\s*\{\s*display:\s*none\s*!important;\s*\}/);
+  assert.match(style, /\.work-layout\s*\{\s*display:\s*grid/);
+  assert.match(style, /\.confirmation\s*\{/);
 });
 
 test("session token is removed from the URL and used only as a bearer header", async () => {
@@ -194,6 +207,8 @@ test("project creation posts the contract fields and selects refreshed project s
     return apiResponse(responses.shift());
   });
   await app.start();
+  assert.equal(document.getElementById("empty-projects").hidden, false);
+  assert.equal(document.getElementById("work-content").hidden, true);
   document.getElementById("project-name").value = "  My App  ";
   document.getElementById("bundle-id").value = " com.example.myapp ";
   document.getElementById("project-directory").value = " My App ";
@@ -227,6 +242,41 @@ test("input invalidation prevents a stale plan response from enabling execution"
   assert.equal(app.state.currentPlan, null);
   assert.equal(document.getElementById("plan-panel").hidden, true);
   assert.equal(document.getElementById("run-plan").disabled, true);
+});
+
+test("requesting a replacement plan clears the prior plan even when replanning fails", async () => {
+  let planRequests = 0;
+  let rejectReplan;
+  const fetcher = async (path) => {
+    if (path === "/api/state") return apiResponse(baseState());
+    planRequests += 1;
+    if (planRequests === 1) return apiResponse({
+      id: "first-plan", action: "build", title: "Build", steps: [], blockers: [], warnings: [],
+      requiresConfirmation: true, executable: true
+    });
+    return new Promise((resolve) => {
+      rejectReplan = () => resolve(apiError("Fresh planning failed."));
+    });
+  };
+  const { app, document } = createHarness(fetcher);
+  await app.start();
+  app.state.selectedAction = "build";
+  await app.reviewPlan();
+  document.getElementById("confirm-execution").checked = true;
+  await document.getElementById("confirm-execution").dispatch("change");
+  assert.equal(document.getElementById("run-plan").disabled, false);
+
+  const pending = app.reviewPlan();
+  assert.equal(app.state.currentPlan, null);
+  assert.equal(document.getElementById("confirm-execution").checked, false);
+  assert.equal(document.getElementById("plan-panel").hidden, true);
+  assert.equal(document.getElementById("run-plan").disabled, true);
+  rejectReplan();
+  await pending;
+
+  assert.equal(app.state.currentPlan, null);
+  assert.equal(document.getElementById("run-plan").disabled, true);
+  assert.equal(document.getElementById("plan-status").textContent, "Fresh planning failed.");
 });
 
 test("plan requests contain only operation inputs and render spaced arguments as boundaries", async () => {
@@ -296,6 +346,100 @@ test("confirmation is explicit and duplicate run requests are suppressed", async
   resolveRun();
   await Promise.all([firstRun, duplicateRun]);
   assert.equal(runRequests.length, 1);
+});
+
+test("diagnostic refresh merges history with fresh session results by stable ID", async () => {
+  const sessionResult = {
+    id: "run-session", action: "build", status: "succeeded", exitCode: 0, output: "fresh output",
+    startedAt: "2026-09-08T10:00:00Z", finishedAt: "2026-09-08T10:00:01Z"
+  };
+  const olderResult = {
+    id: "run-history", action: "build", status: "failed", exitCode: 1, output: "older output",
+    startedAt: "2026-09-08T09:00:00Z", finishedAt: "2026-09-08T09:00:01Z"
+  };
+  let stateLoads = 0;
+  const fetcher = async (path) => {
+    if (path === "/api/state") {
+      stateLoads += 1;
+      if (stateLoads === 1) return apiResponse(baseState({ history: [olderResult] }));
+      if (stateLoads === 2) return apiResponse(baseState({ history: [] }));
+      return apiResponse(baseState({ history: [
+        { ...sessionResult, output: "stale output" },
+        { ...olderResult, output: "updated backend output" }
+      ] }));
+    }
+    if (path === "/api/plan") return apiResponse({
+      id: "plan-session", action: "build", title: "Build", steps: [], blockers: [], warnings: [],
+      requiresConfirmation: false, executable: true
+    });
+    return apiResponse(sessionResult);
+  };
+  const { app } = createHarness(fetcher);
+  await app.start();
+  app.state.selectedAction = "build";
+  await app.reviewPlan();
+  await app.runPlan();
+  assert.deepEqual(Array.from(app.state.results, (result) => result.id), ["run-session", "run-history"]);
+
+  await app.loadState();
+  assert.deepEqual(Array.from(app.state.results, (result) => result.id), ["run-session"]);
+  assert.equal(app.state.results[0].output, "fresh output");
+
+  await app.loadState();
+  assert.deepEqual(Array.from(app.state.results, (result) => result.id), ["run-session", "run-history"]);
+  assert.equal(app.state.results[0].output, "fresh output");
+  assert.equal(app.state.results[1].output, "updated backend output");
+});
+
+test("a result-bearing run failure is logged and consumes the executed plan", async () => {
+  const failedResult = {
+    id: "run-failed", action: "build", status: "failed", exitCode: 17, output: "compiler failed safely",
+    startedAt: "2026-09-08T10:00:00Z", finishedAt: "2026-09-08T10:00:02Z"
+  };
+  const fetcher = async (path) => {
+    if (path === "/api/state") return apiResponse(baseState());
+    if (path === "/api/plan") return apiResponse({
+      id: "plan-failed", action: "build", title: "Build", steps: [], blockers: [], warnings: [],
+      requiresConfirmation: false, executable: true
+    });
+    return apiError("The launched operation failed.", failedResult, 422);
+  };
+  const { app, document } = createHarness(fetcher);
+  await app.start();
+  app.state.selectedAction = "build";
+  await app.reviewPlan();
+  await app.runPlan();
+
+  assert.equal(app.state.currentPlan, null);
+  assert.equal(app.state.results.length, 1);
+  assert.equal(app.state.results[0], failedResult);
+  assert.equal(document.getElementById("alert-message").textContent, "The launched operation failed.");
+  assert.equal(document.getElementById("results-view").hidden, false);
+  const resultText = descendants(document.getElementById("result-list")).map((element) => element.textContent);
+  assert.ok(resultText.includes("failed"));
+  assert.ok(resultText.includes("Exit code: 17"));
+  assert.ok(resultText.includes("compiler failed safely"));
+});
+
+test("an ordinary run error shows the error without inventing a result", async () => {
+  const fetcher = async (path) => {
+    if (path === "/api/state") return apiResponse(baseState());
+    if (path === "/api/plan") return apiResponse({
+      id: "plan-retryable", action: "build", title: "Build", steps: [], blockers: [], warnings: [],
+      requiresConfirmation: false, executable: true
+    });
+    return apiError("The plan was not launched.", undefined, 409);
+  };
+  const { app, document } = createHarness(fetcher);
+  await app.start();
+  app.state.selectedAction = "build";
+  await app.reviewPlan();
+  await app.runPlan();
+
+  assert.equal(app.state.currentPlan.id, "plan-retryable");
+  assert.equal(app.state.results.length, 0);
+  assert.equal(document.getElementById("alert-message").textContent, "The plan was not launched.");
+  assert.equal(document.getElementById("execution-status").textContent, "The plan was not launched.");
 });
 
 test("transport failure disables requests until an explicit retry succeeds", async () => {

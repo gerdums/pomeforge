@@ -20,7 +20,7 @@ If the page reports a missing or expired session, close the tab and start `orcha
 - Displays the tool and capability diagnostics reported by Orchard, including missing, incompatible, limited, and unverified states.
 - Requests an operation plan and shows its executable, each exact argument boundary, working directory, blockers, and warnings.
 - Runs only the returned plan identifier. Operations marked as externally mutating require an explicit confirmation checkbox.
-- Displays actual process status, exit code, timestamps, and output. An empty result log means that no retained runs were reported.
+- Displays actual process status, exit code, timestamps, and output, including actual output returned with a failed run. Refreshing diagnostics merges backend history with results from the current browser session by result ID, so a temporarily empty history response does not discard a completed run. An empty result log means that no retained runs were reported.
 
 Changing a project, action, IPA path, or device identifier invalidates the current plan. Tool installation links are shown only when Orchard reports a valid HTTPS URL. The application has no remote scripts, fonts, analytics, or frontend-only fixture mode.
 
@@ -40,7 +40,7 @@ It writes only these Orchard-owned files beneath `${XDG_DATA_HOME:-$HOME/.local/
 - `applications/orchard.desktop`
 - `icons/hicolor/scalable/apps/orchard.svg`
 
-The launcher uses `${ORCHARD_WORKSPACE}` when set, otherwise `${XDG_DATA_HOME:-$HOME/.local/share}/orchard/workspace`. Paths containing spaces are passed as single arguments. It starts the documented command directly, without a shell evaluation step:
+The launcher uses `${ORCHARD_WORKSPACE}` when set, otherwise an absolute `${XDG_DATA_HOME}/orchard/workspace` or `$HOME/.local/share/orchard/workspace`. A relative `XDG_DATA_HOME` is ignored consistently by the installer and launcher in favor of that standard home-directory default. Workspace paths containing spaces or percent characters are passed as single arguments. The installer rejects an install root containing a percent sign, an equals sign, control characters, or non-ASCII characters before writing files because those executable paths cannot be represented reliably in a desktop entry. It starts the documented command directly, without a shell evaluation step:
 
 ```text
 orchard app --open --workspace PATH --listen 127.0.0.1:0

@@ -58,6 +58,7 @@
       disconnected: false,
       busy: { state: false, plan: false, run: false, create: false },
       previousFocus: null,
+      sessionResults: [],
       results: []
     };
 
@@ -146,7 +147,11 @@
         } else {
           showAlert("Request failed", apiMessage, false);
         }
-        throw new Error(apiMessage);
+        const apiError = new Error(apiMessage);
+        if (payload && payload.error && payload.error.result && typeof payload.error.result === "object" && !Array.isArray(payload.error.result)) {
+          apiError.result = payload.error.result;
+        }
+        throw apiError;
       }
 
       return payload.data;
@@ -352,13 +357,28 @@
       });
     }
 
+    function mergeResultRecords(primary, secondary) {
+      const merged = [];
+      const resultIds = new Set();
+      [primary, secondary].forEach((records) => {
+        normalizedList(records).forEach((record) => {
+          if (!record || typeof record !== "object" || Array.isArray(record)) return;
+          const id = typeof record.id === "string" && record.id.length > 0 ? record.id : "";
+          if (id && resultIds.has(id)) return;
+          if (id) resultIds.add(id);
+          merged.push(record);
+        });
+      });
+      return merged;
+    }
+
     function renderState(preferredProject) {
       elements["app-version"].textContent = state.server.version ? `Orchard ${state.server.version}` : "Version unavailable";
       elements["workspace-path"].textContent = textValue(state.server.workspace, "Local workspace");
       renderProjects(preferredProject);
       renderActions();
       renderDiagnostics();
-      state.results = normalizedList(state.server.history).slice();
+      state.results = mergeResultRecords(state.sessionResults, state.server.history);
       renderResults();
       invalidatePlan(state.selectedProject ? "Choose an operation to continue." : "Create a project to continue.");
     }
@@ -461,10 +481,10 @@
 
     async function reviewPlan() {
       if (state.busy.plan || anyBusy() || state.disconnected || !state.selectedProject || !state.selectedAction) return;
+      invalidatePlan("Reviewing operation plan…");
       const revision = state.inputRevision;
-      const requestSequence = ++state.planRequestSequence;
+      const requestSequence = state.planRequestSequence;
       state.busy.plan = true;
-      elements["plan-status"].textContent = "Reviewing operation plan…";
       updateControls();
 
       try {
@@ -515,13 +535,23 @@
           method: "POST",
           body: { planId: plan.id, confirm: confirmed }
         });
-        state.results.unshift(result || {});
+        state.sessionResults = mergeResultRecords(result && typeof result === "object" ? [result] : [], state.sessionResults);
+        state.results = mergeResultRecords(state.sessionResults, state.results);
         renderResults();
         elements["execution-status"].textContent = `Operation ${textValue(result && result.status, "finished")}.`;
         showView("results");
         state.currentPlan = null;
         elements["confirm-execution"].checked = false;
       } catch (error) {
+        if (error.result) {
+          state.sessionResults = mergeResultRecords([error.result], state.sessionResults);
+          state.results = mergeResultRecords(state.sessionResults, state.results);
+          renderResults();
+          state.currentPlan = null;
+          elements["confirm-execution"].checked = false;
+          elements["plan-panel"].hidden = true;
+          showView("results");
+        }
         if (!state.disconnected) elements["execution-status"].textContent = error.message;
       } finally {
         state.busy.run = false;

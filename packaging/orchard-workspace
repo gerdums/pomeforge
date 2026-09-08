@@ -1,11 +1,10 @@
 #!/bin/sh
 set -eu
 
-if [ -n "${XDG_DATA_HOME:-}" ]; then
-  orchard_data_home=$XDG_DATA_HOME
-else
-  orchard_data_home=$HOME/.local/share
-fi
+case ${XDG_DATA_HOME:-} in
+  /*) orchard_data_home=$XDG_DATA_HOME ;;
+  *) orchard_data_home=$HOME/.local/share ;;
+esac
 
 orchard_binary=$orchard_data_home/orchard/bin/orchard
 if [ ! -x "$orchard_binary" ]; then
