@@ -202,9 +202,11 @@ zsign's documented flags support a separate key and certificate:
 ```sh
 zsign -k /private/distribution.key -c /private/certificate.pem \
   -m /private/app.mobileprovision -e /private/app-entitlements.plist \
-  -o dist/Hello.ipa staged/Hello.app
+  -o dist/Hello.ipa private-stage/archive/Payload/Hello.app
 zsign -C dist/Hello.ipa
 ```
+
+For zsign 1.1.2 to create an IPA, the app must be beneath a `Payload` directory. It archives the directory containing `Payload`, so that archive root must contain only intended IPA content. Keep key/certificate files, entitlements, catalog scratch data, and the output IPA outside it. A Linux run with the pinned binary reproduced a successful signature followed by “Can't find payload directory!” when this layout was absent. [Pinned packaging implementation](https://github.com/zhlynn/zsign/blob/v1.1.2/src/zsign.cpp#L479-L498).
 
 `-m` can repeat for extension profiles. `-C` checks certificate/OCSP status; it is not a complete Apple archive validator. The documented `-p` option puts a password on argv. Orchard should instead use a short-lived protected PEM file, or upstream a file-descriptor/password-file interface before supporting encrypted P12 input. Do not silently use ad-hoc signatures or development profiles for an App Store build. [zsign source and CLI](https://github.com/zhlynn/zsign/tree/v1.1.2).
 
