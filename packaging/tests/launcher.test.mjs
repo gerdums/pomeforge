@@ -80,7 +80,7 @@ test("unrepresentable install roots fail before writes", async (t) => {
   await writeFile(sourceBinary, "#!/bin/sh\nexit 0\n");
   await chmod(sourceBinary, 0o755);
 
-  for (const name of ["data%root", "data\troot", "data=root", "dáta-root"]) {
+  for (const name of ["data%root", "data\troot", "data\nroot", "data=root", "dáta-root"]) {
     const dataHome = path.join(root, name);
     const result = spawnSync(path.join(packagingDir, "install.sh"), [sourceBinary], {
       env: { ...process.env, HOME: home, XDG_DATA_HOME: dataHome }, encoding: "utf8"
@@ -125,6 +125,45 @@ test("relative XDG_DATA_HOME uses the same standard default for install and laun
   assert.deepEqual(argumentsSeen, [
     "app", "--open", "--workspace", path.join(defaultDataHome, "orchard", "workspace"), "--listen", "127.0.0.1:0"
   ]);
+});
+
+test("documented uninstall ignores a relative XDG_DATA_HOME", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "orchard uninstall docs test "));
+  t.after(async () => {
+    const { rm } = await import("node:fs/promises");
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const home = path.join(root, "home");
+  const defaultDataHome = path.join(home, ".local", "share");
+  const relativeDataHome = path.join(root, "relative-data-home");
+  const installedFiles = [
+    "applications/orchard.desktop",
+    "icons/hicolor/scalable/apps/orchard.svg",
+    "orchard/bin/orchard-workspace",
+    "orchard/bin/orchard"
+  ];
+  for (const relativePath of installedFiles) {
+    await mkdir(path.dirname(path.join(defaultDataHome, relativePath)), { recursive: true });
+    await mkdir(path.dirname(path.join(relativeDataHome, relativePath)), { recursive: true });
+    await writeFile(path.join(defaultDataHome, relativePath), "installed\n");
+    await writeFile(path.join(relativeDataHome, relativePath), "unrelated\n");
+  }
+
+  const docs = await readFile(path.resolve(packagingDir, "../docs/app.md"), "utf8");
+  const uninstall = docs.match(/## Uninstall[\s\S]*?```sh\n([\s\S]*?)```/);
+  assert.ok(uninstall, "missing uninstall shell snippet");
+  const uninstallResult = spawnSync("sh", ["-eu", "-c", uninstall[1]], {
+    cwd: root,
+    env: { ...process.env, HOME: home, XDG_DATA_HOME: "relative-data-home" },
+    encoding: "utf8"
+  });
+  assert.equal(uninstallResult.status, 0, uninstallResult.stderr);
+
+  for (const relativePath of installedFiles) {
+    await assert.rejects(access(path.join(defaultDataHome, relativePath)), { code: "ENOENT" });
+    assert.equal(await readFile(path.join(relativeDataHome, relativePath), "utf8"), "unrelated\n");
+  }
 });
 
 test("packaging sources do not embed a developer home path or parse startup output", async () => {

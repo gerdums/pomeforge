@@ -59,11 +59,14 @@ Apple Developer Program membership, credentials, signing authorization, compatib
 Close any running Orchard process, then remove only the installed files:
 
 ```sh
-data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
+case ${XDG_DATA_HOME:-} in
+  /*) data_home=$XDG_DATA_HOME ;;
+  *) data_home=$HOME/.local/share ;;
+esac
 rm -f -- "$data_home/applications/orchard.desktop"
 rm -f -- "$data_home/icons/hicolor/scalable/apps/orchard.svg"
 rm -f -- "$data_home/orchard/bin/orchard-workspace"
 rm -f -- "$data_home/orchard/bin/orchard"
 ```
 
-The workspace directory and its projects are intentionally preserved. Remove `${XDG_DATA_HOME:-$HOME/.local/share}/orchard/workspace` separately only if you have reviewed and no longer need its contents.
+The workspace directory and its projects are intentionally preserved. Remove `$data_home/orchard/workspace` separately only if you have reviewed and no longer need its contents.

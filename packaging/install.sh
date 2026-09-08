@@ -1,5 +1,7 @@
 #!/bin/sh
 set -eu
+LC_ALL=C
+export LC_ALL
 
 usage() {
   printf '%s\n' "Usage: $0 /path/to/prebuilt/orchard" >&2
@@ -44,10 +46,12 @@ case $launcher_path in
     exit 1
     ;;
 esac
-if printf '%s' "$launcher_path" | LC_ALL=C grep -q '[^ -~]'; then
-  printf '%s\n' "The Orchard install location contains unsupported characters." >&2
-  exit 1
-fi
+case $launcher_path in
+  *[!\ -~]*)
+    printf '%s\n' "The Orchard install location contains unsupported characters." >&2
+    exit 1
+    ;;
+esac
 
 mkdir -p -- "$orchard_bin_dir" "$applications_dir" "$icons_dir" "$orchard_root/workspace"
 install -m 0755 "$orchard_source" "$orchard_bin_dir/orchard"
