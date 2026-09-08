@@ -102,6 +102,28 @@ func TestAPITokenHostOriginAndRoot(t *testing.T) {
 		t.Fatalf("foreign host status = %d", response.StatusCode)
 	}
 	_ = response.Body.Close()
+	req, _ = http.NewRequest(http.MethodGet, server.URL+"/api/state", nil)
+	req.Host = "127.0.0.1:1"
+	req.Header.Set("Authorization", "Bearer test-token")
+	response, err = server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("mismatched loopback port status = %d", response.StatusCode)
+	}
+	_ = response.Body.Close()
+	req, _ = http.NewRequest(http.MethodGet, server.URL+"/api/state", nil)
+	req.Host = "localhost:" + strings.TrimPrefix(server.URL, "http://127.0.0.1:")
+	req.Header.Set("Authorization", "Bearer test-token")
+	response, err = server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("deliberate loopback alias status = %d", response.StatusCode)
+	}
+	_ = response.Body.Close()
 	response = request(t, server, http.MethodGet, "/api/state", "", "test-token", server.URL)
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("authorized status = %d", response.StatusCode)
@@ -228,6 +250,36 @@ func TestAPIRejectsStaleStoredPlan(t *testing.T) {
 	_ = response.Body.Close()
 }
 
+func TestAPIReturnsRedactedFailedOperationResult(t *testing.T) {
+	server, api, workspace := testAPI(t)
+	if _, err := orchard.CreateProject(workspace, "Demo", "Demo", "com.example.Demo"); err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(workspace, "xtool-fixture")
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\nprintf 'token=syntheticsecrettoken'\nexit 7\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tools := api.Service.Tools.(webTools)
+	tools["xtool"] = orchard.ToolStatus{ID: "xtool", Name: "xtool", Status: "available", Path: executable, Detail: "fixture"}
+	response := request(t, server, http.MethodPost, "/api/plan", `{"action":"devices","project":"Demo"}`, "test-token", "")
+	var planned struct {
+		Data orchard.Plan `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&planned); err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	response = request(t, server, http.MethodPost, "/api/run", `{"planId":"`+planned.Data.ID+`","confirm":false}`, "test-token", "")
+	body, _ := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK || !bytes.Contains(body, []byte(`"status":"failed"`)) || !bytes.Contains(body, []byte(`"exitCode":7`)) {
+		t.Fatalf("failed operation response status=%d body=%s", response.StatusCode, body)
+	}
+	if bytes.Contains(body, []byte("syntheticsecrettoken")) || !bytes.Contains(body, []byte("[redacted]")) {
+		t.Fatalf("failed output was not redacted: %s", body)
+	}
+}
+
 func TestServeAppPrintsActualTokenURLAndRejectsForeignBind(t *testing.T) {
 	service, err := orchard.NewService(t.TempDir(), webTools{})
 	if err != nil {
@@ -291,6 +343,57 @@ func TestServeAppPrintsActualTokenURLAndRejectsForeignBind(t *testing.T) {
 	}
 	_ = jsonWriter.Close()
 	_ = jsonReader.Close()
+}
+
+func TestServeAppBrowserOpenerEnvironment(t *testing.T) {
+	workspace := t.TempDir()
+	service, err := orchard.NewService(workspace, webTools{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	toolsDirectory := t.TempDir()
+	environmentFile := filepath.Join(t.TempDir(), "opener-environment")
+	opener := filepath.Join(toolsDirectory, "xdg-open")
+	if err := os.WriteFile(opener, []byte("#!/bin/sh\nenv > '"+environmentFile+"'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", toolsDirectory+":/usr/bin:/bin")
+	t.Setenv("DISPLAY", ":42")
+	t.Setenv("WAYLAND_DISPLAY", "wayland-42")
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/synthetic-bus")
+	t.Setenv("XDG_CURRENT_DESKTOP", "synthetic-desktop")
+	t.Setenv("ASC_PRIVATE_KEY", "synthetic-account-secret")
+	ctx, cancel := context.WithCancel(context.Background())
+	reader, writer := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		done <- ServeApp(ctx, service, AppOptions{Listen: "127.0.0.1:0", Open: true, Output: writer})
+	}()
+	if _, err := bufio.NewReader(reader).ReadString('\n'); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	var contents []byte
+	for time.Now().Before(deadline) {
+		contents, err = os.ReadFile(environmentFile)
+		if err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	_ = writer.Close()
+	_ = reader.Close()
+	environment := string(contents)
+	for _, expected := range []string{"DISPLAY=:42", "WAYLAND_DISPLAY=wayland-42", "DBUS_SESSION_BUS_ADDRESS=unix:path=/synthetic-bus", "XDG_CURRENT_DESKTOP=synthetic-desktop"} {
+		if !strings.Contains(environment, expected) {
+			t.Errorf("opener environment missing %q: %s", expected, environment)
+		}
+	}
+	if strings.Contains(environment, "ASC_PRIVATE_KEY") || strings.Contains(environment, "synthetic-account-secret") {
+		t.Fatalf("opener inherited account secret: %s", environment)
+	}
 }
 
 func TestJSONEnvelopeShape(t *testing.T) {

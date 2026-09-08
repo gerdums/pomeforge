@@ -109,6 +109,23 @@ func TestCLIUnknownFlagsAndExitCodes(t *testing.T) {
 	}
 }
 
+func TestHumanHelpAndCommandHelp(t *testing.T) {
+	for _, args := range [][]string{{"--help"}, {"init", "--help"}, {"plan", "--help"}, {"run", "build", "--help"}, {"app", "-h"}} {
+		code, stdout, stderr := runCLI(t, args...)
+		if code != 0 || stderr != "" || !strings.Contains(stdout, "Usage:") {
+			t.Fatalf("%v: code=%d stdout=%q stderr=%q", args, code, stdout, stderr)
+		}
+	}
+	_, planHelp, _ := runCLI(t, "plan", "--help")
+	if !strings.Contains(planHelp, "upload, submit") {
+		t.Fatalf("plan help omitted action list: %q", planHelp)
+	}
+	code, stdout, _ := runCLI(t, "doctor", "--unknown", "--help", "--json")
+	if code != 2 || !strings.Contains(stdout, `"code":"unknown_flag"`) {
+		t.Fatalf("unknown flag was hidden by help: code=%d output=%s", code, stdout)
+	}
+}
+
 func TestCLIRejectsForeignAppBind(t *testing.T) {
 	workspace := t.TempDir()
 	code, _, stderr := runCLI(t, "app", "--workspace", workspace, "--listen", "0.0.0.0:0")
@@ -124,13 +141,17 @@ func TestCLIReturnsChildExitCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	previous := defaultTools
+	executable := filepath.Join(workspace, "failure-fixture")
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\nprintf 'token=syntheticsecrettoken'\nexit 7\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	defaultTools = cliTools{
-		"swift": {ID: "swift", Name: "swift", Status: "available", Path: "/bin/false", Detail: "fixture"},
-		"xtool": {ID: "xtool", Name: "xtool", Status: "available", Path: "/bin/false", Detail: "fixture"},
+		"swift": {ID: "swift", Name: "swift", Status: "available", Path: executable, Detail: "fixture"},
+		"xtool": {ID: "xtool", Name: "xtool", Status: "available", Path: executable, Detail: "fixture"},
 	}
 	t.Cleanup(func() { defaultTools = previous })
 	code, stdout, stderr := runCLI(t, "run", "build", "--project", project.Path, "--execute", "--json")
-	if code != 1 || stderr != "" || !strings.Contains(stdout, `"status":"failed"`) || !strings.Contains(stdout, `"exitCode":1`) {
+	if code != 7 || stderr != "" || !strings.Contains(stdout, `"status":"failed"`) || !strings.Contains(stdout, `"exitCode":7`) || strings.Contains(stdout, "syntheticsecrettoken") || !strings.Contains(stdout, "[redacted]") {
 		t.Fatalf("child failure: code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 }

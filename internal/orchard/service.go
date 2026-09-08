@@ -50,6 +50,12 @@ func (s *Service) PlanOperation(ctx context.Context, input PlanInput, store bool
 func (s *Service) RunStored(ctx context.Context, planID string, confirm bool) (OperationResult, error) {
 	s.mu.Lock()
 	input, ok := s.plans[planID]
+	if ok {
+		// A stored plan authorizes one attempt. Reserving it under the same lock
+		// prevents both concurrent and later replay; an explicit new planning
+		// request can store a fresh authorization opportunity.
+		delete(s.plans, planID)
+	}
 	s.mu.Unlock()
 	if !ok {
 		return OperationResult{}, Errorf("plan_not_found", "unknown or expired plan ID")

@@ -2,10 +2,14 @@ package orchard
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -32,6 +36,17 @@ func TestProcessHelper(t *testing.T) {
 	case "sleep":
 		time.Sleep(250 * time.Millisecond)
 		fmt.Fprint(os.Stdout, "done")
+	case "descendant-parent":
+		child := exec.Command(os.Args[0], "-test.run=TestProcessHelper", "--", "descendant-child", os.Args[separator+2])
+		child.Stdout = os.Stdout
+		child.Stderr = os.Stderr
+		if err := child.Start(); err != nil {
+			os.Exit(9)
+		}
+		time.Sleep(10 * time.Second)
+	case "descendant-child":
+		time.Sleep(800 * time.Millisecond)
+		_ = os.WriteFile(os.Args[separator+2], []byte(strconv.Itoa(os.Getpid())), 0o600)
 	}
 }
 
@@ -127,15 +142,67 @@ func TestExecutorTimeoutConfirmationAndDuplicate(t *testing.T) {
 	<-done
 }
 
+func TestExecutorEnforcesLinuxForBuildActions(t *testing.T) {
+	project := t.TempDir()
+	if _, err := (&Executor{HostOS: "darwin"}).Execute(context.Background(), helperPlan(project, "large"), project, false); err == nil || !strings.Contains(err.Error(), "only when Orchard is running on Linux") {
+		t.Fatalf("non-Linux executor accepted build plan: %v", err)
+	}
+}
+
 func TestChildEnvironmentIsNarrow(t *testing.T) {
 	t.Setenv("ORCHARD_TEST_SECRET", "must-not-pass")
 	t.Setenv("ASC_CONFIG_PATH", "/private/config")
-	environment := strings.Join(ChildEnvironment(), "\n")
-	if strings.Contains(environment, "ORCHARD_TEST_SECRET") {
+	t.Setenv("SWIFT_DRIVER_SWIFTSCAN_LIB", "/swift/lib")
+	buildEnvironment := strings.Join(ChildEnvironmentFor("xtool"), "\n")
+	if strings.Contains(buildEnvironment, "ORCHARD_TEST_SECRET") || strings.Contains(buildEnvironment, "ASC_CONFIG_PATH") {
 		t.Fatal("unrelated environment leaked")
 	}
-	if !strings.Contains(environment, "ASC_CONFIG_PATH=/private/config") || !strings.Contains(environment, "ASC_TELEMETRY_DISABLED=1") {
+	if !strings.Contains(buildEnvironment, "SWIFT_DRIVER_SWIFTSCAN_LIB=/swift/lib") {
+		t.Fatal("Swift environment was not preserved for build tools")
+	}
+	ascEnvironment := strings.Join(ChildEnvironmentFor(EnvironmentASC), "\n")
+	if !strings.Contains(ascEnvironment, "ASC_CONFIG_PATH=/private/config") || !strings.Contains(ascEnvironment, "ASC_TELEMETRY_DISABLED=1") {
 		t.Fatal("required ASC environment not preserved")
+	}
+	probeEnvironment := strings.Join(ChildEnvironmentFor(EnvironmentProbe), "\n")
+	if strings.Contains(probeEnvironment, "ASC_CONFIG_PATH") {
+		t.Fatal("credential-free metadata probe inherited ASC configuration")
+	}
+}
+
+func TestExecutorKillsProcessGroupAtDeadline(t *testing.T) {
+	project := t.TempDir()
+	marker := filepath.Join(project, "descendant-finished")
+	plan := helperPlan(project, "descendant-parent")
+	plan.Steps[0].Args = append(plan.Steps[0].Args, marker)
+	started := time.Now()
+	result, err := (&Executor{Timeout: 80 * time.Millisecond}).Execute(context.Background(), plan, project, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExitCode != 124 || result.Status != "failed" {
+		t.Fatalf("timeout result = %#v", result)
+	}
+	if time.Since(started) > time.Second {
+		t.Fatalf("process group timeout was not bounded: %s", time.Since(started))
+	}
+	time.Sleep(850 * time.Millisecond)
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("descendant survived process-group kill: %v", err)
+	}
+}
+
+func TestOutputRedactsPEMJWTEnvironmentValueAndPresignedURL(t *testing.T) {
+	credential := "synthetic-environment-canary"
+	t.Setenv("ASC_PRIVATE_KEY", credential)
+	input := "-----BEGIN PRIVATE KEY-----\nsynthetic-body\n-----END PRIVATE KEY-----\n" +
+		"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzeW50aGV0aWMifQ.c3ludGhldGljLXNpZ25hdHVyZQ " + credential +
+		" https://upload.example.invalid/object?X-Amz-Signature=fakecapability&X-Amz-Expires=60"
+	redacted := redactOutput(input)
+	for _, forbidden := range []string{"synthetic-body", "eyJhbGci", credential, "fakecapability"} {
+		if strings.Contains(redacted, forbidden) {
+			t.Fatalf("redaction retained %q in %q", forbidden, redacted)
+		}
 	}
 }
 
@@ -157,5 +224,38 @@ func TestHistoryRejectsSymlink(t *testing.T) {
 	contents, _ := os.ReadFile(outside)
 	if string(contents) != "preserve" {
 		t.Fatal("symlink target was modified")
+	}
+}
+
+func TestHistoryRejectsSpecialAndOversizedFiles(t *testing.T) {
+	project := t.TempDir()
+	directory := filepath.Join(project, ".orchard")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, "history.jsonl")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	if _, err := LoadHistory(project, 10); err == nil || !strings.Contains(err.Error(), "regular") {
+		t.Fatalf("FIFO history was not rejected: %v", err)
+	}
+	if time.Since(started) > time.Second {
+		t.Fatal("FIFO history read blocked")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Truncate(maxHistoryBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	_ = file.Close()
+	if _, err := LoadHistory(project, 10); err == nil || !strings.Contains(err.Error(), "read limit") {
+		t.Fatalf("oversized history was not rejected: %v", err)
 	}
 }

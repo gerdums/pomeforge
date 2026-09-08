@@ -12,27 +12,52 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
+)
+
+const (
+	EnvironmentProbe   = "probe"
+	EnvironmentASC     = "asc"
+	EnvironmentBrowser = "browser"
+	maxHistoryBytes    = 8 << 20
 )
 
 type Executor struct {
 	Timeout   time.Duration
 	OutputCap int
+	HostOS    string
 
 	mu      sync.Mutex
 	running map[string]bool
 }
 
 func ChildEnvironment() []string {
+	return ChildEnvironmentFor("")
+}
+
+func ChildEnvironmentFor(adapter string) []string {
 	allowedExact := map[string]bool{
 		"HOME": true, "PATH": true, "TMPDIR": true, "LANG": true, "LC_ALL": true,
 		"SSL_CERT_FILE": true, "SSL_CERT_DIR": true, "HTTP_PROXY": true, "HTTPS_PROXY": true,
 		"NO_PROXY": true, "http_proxy": true, "https_proxy": true, "no_proxy": true,
 	}
-	allowedPrefixes := []string{"XDG_", "ASC_", "SWIFT_"}
+	allowedPrefixes := []string{"XDG_"}
+	if adapter != EnvironmentProbe && adapter != EnvironmentBrowser && adapter != EnvironmentASC {
+		allowedPrefixes = append(allowedPrefixes, "SWIFT_")
+	}
+	if adapter == EnvironmentASC {
+		allowedPrefixes = append(allowedPrefixes, "ASC_")
+	}
+	if adapter == EnvironmentBrowser {
+		for _, key := range []string{"DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS", "DESKTOP_SESSION", "XDG_CURRENT_DESKTOP", "XDG_SESSION_DESKTOP", "XDG_SESSION_TYPE", "XDG_RUNTIME_DIR"} {
+			allowedExact[key] = true
+		}
+	}
 	values := map[string]string{}
 	for _, entry := range os.Environ() {
 		key, value, found := strings.Cut(entry, "=")
@@ -49,7 +74,9 @@ func ChildEnvironment() []string {
 			values[key] = value
 		}
 	}
-	values["ASC_TELEMETRY_DISABLED"] = "1"
+	if adapter == EnvironmentASC {
+		values["ASC_TELEMETRY_DISABLED"] = "1"
+	}
 	values["DO_NOT_TRACK"] = "1"
 	keys := make([]string, 0, len(values))
 	for key := range values {
@@ -64,11 +91,18 @@ func ChildEnvironment() []string {
 }
 
 func (e *Executor) Execute(ctx context.Context, plan Plan, project string, confirm bool) (OperationResult, error) {
+	hostOS := e.HostOS
+	if hostOS == "" {
+		hostOS = runtime.GOOS
+	}
+	if actionRequiresLinux(plan.Action) && hostOS != "linux" {
+		return OperationResult{}, Errorf("blocked", "this compile, signing, or export workflow is supported only when Orchard is running on Linux")
+	}
 	if !plan.Executable {
 		return OperationResult{}, Errorf("blocked", "operation is blocked: "+strings.Join(plan.Blockers, "; "))
 	}
 	if plan.RequiresConfirmation && !confirm {
-		return OperationResult{}, Errorf("confirmation_required", "this account write requires --confirm")
+		return OperationResult{}, Errorf("confirmation_required", "this operation has an account, signing, or external-write effect and requires --confirm")
 	}
 	key := project + "\x00" + plan.Action
 	e.mu.Lock()
@@ -108,10 +142,12 @@ func (e *Executor) Execute(ctx context.Context, plan Plan, project string, confi
 		stepCtx, cancel := context.WithTimeout(ctx, timeout)
 		cmd := exec.CommandContext(stepCtx, step.Executable, step.Args...)
 		cmd.Dir = step.Directory
-		cmd.Env = ChildEnvironment()
+		cmd.Env = ChildEnvironmentFor(step.Tool)
 		cmd.Stdout = output
 		cmd.Stderr = output
+		configureProcessGroup(cmd)
 		err := cmd.Run()
+		killProcessGroup(cmd)
 		cancel()
 		if errors.Is(stepCtx.Err(), context.DeadlineExceeded) {
 			result.Status = "failed"
@@ -133,7 +169,8 @@ func (e *Executor) Execute(ctx context.Context, plan Plan, project string, confi
 	result.FinishedAt = time.Now().UTC()
 	result.Output = redactOutput(output.String())
 	if err := appendHistory(project, result); err != nil {
-		return result, Errorf("history_failed", "operation completed but history could not be stored: "+err.Error())
+		result.Output = redactOutput(result.Output + "\nhistory warning: operation completed but history could not be stored: " + err.Error() + "\n")
+		return result, nil
 	}
 	return result, nil
 }
@@ -150,17 +187,61 @@ func safeProcessError(err error) string {
 }
 
 var secretPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]+-----.*?-----END [A-Z0-9 ]+-----`),
 	regexp.MustCompile(`(?i)(authorization\s*[:=]\s*bearer\s+)[^\s]+`),
 	regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+`),
 	regexp.MustCompile(`(?i)(private[-_ ]?key\s*[:=]\s*)[^\s]+`),
 	regexp.MustCompile(`(?i)(token\s*[:=]\s*)[A-Za-z0-9._~+/=-]{8,}`),
+	regexp.MustCompile(`[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`),
+	regexp.MustCompile(`(?i)(https?://[^\s?]+)\?[^\s]+`),
 }
 
 func redactOutput(value string) string {
 	for _, pattern := range secretPatterns {
 		value = pattern.ReplaceAllString(value, "${1}[redacted]")
 	}
+	known := credentialEnvironmentValues()
+	sort.Slice(known, func(i, j int) bool { return len(known[i]) > len(known[j]) })
+	for _, secret := range known {
+		value = strings.ReplaceAll(value, secret, "[redacted]")
+	}
 	return value
+}
+
+func credentialEnvironmentValues() []string {
+	values := make([]string, 0)
+	seen := map[string]bool{}
+	for _, entry := range os.Environ() {
+		key, value, found := strings.Cut(entry, "=")
+		upper := strings.ToUpper(key)
+		sensitive := strings.HasPrefix(upper, "ASC_") || strings.Contains(upper, "TOKEN") || strings.Contains(upper, "SECRET") || strings.Contains(upper, "PASSWORD") || strings.Contains(upper, "PRIVATE_KEY")
+		if found && sensitive && len(value) >= 4 && !seen[value] {
+			seen[value] = true
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
+func configureProcessGroup(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.WaitDelay = 500 * time.Millisecond
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return os.ErrProcessDone
+		}
+		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if errors.Is(err, syscall.ESRCH) {
+			return os.ErrProcessDone
+		}
+		return err
+	}
+}
+
+func killProcessGroup(cmd *exec.Cmd) {
+	if cmd.Process != nil {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
 }
 
 func operationID() string {
@@ -172,11 +253,7 @@ func operationID() string {
 }
 
 func appendHistory(project string, result OperationResult) error {
-	if err := ensureHistory(project); err != nil {
-		return err
-	}
-	path := filepath.Join(project, ".orchard", "history.jsonl")
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
+	file, err := openHistory(project, syscall.O_WRONLY|syscall.O_APPEND, true)
 	if err != nil {
 		return err
 	}
@@ -191,48 +268,29 @@ func appendHistory(project string, result OperationResult) error {
 }
 
 func ensureHistory(project string) error {
-	directory := filepath.Join(project, ".orchard")
-	if info, err := os.Lstat(directory); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		return errors.New(".orchard must not be a symlink")
-	}
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return err
-	}
-	if err := os.Chmod(directory, 0o700); err != nil {
-		return err
-	}
-	path := filepath.Join(directory, "history.jsonl")
-	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		return errors.New("history.jsonl must not be a symlink")
-	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	file, err := openHistory(project, syscall.O_WRONLY|syscall.O_APPEND, true)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-	if err := file.Chmod(0o600); err != nil {
-		return err
-	}
-	return nil
+	return file.Close()
 }
 
 func LoadHistory(project string, limit int) ([]OperationResult, error) {
-	directory := filepath.Join(project, ".orchard")
-	if info, err := os.Lstat(directory); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		return nil, errors.New(".orchard must not be a symlink")
-	}
-	path := filepath.Join(project, ".orchard", "history.jsonl")
-	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		return nil, errors.New("history.jsonl must not be a symlink")
-	}
-	file, err := os.Open(path)
-	if errors.Is(err, os.ErrNotExist) {
+	file, err := openHistory(project, syscall.O_RDONLY, false)
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOENT) {
 		return []OperationResult{}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > maxHistoryBytes {
+		return nil, fmt.Errorf("history.jsonl exceeds the %d-byte read limit", maxHistoryBytes)
+	}
 	if limit <= 0 {
 		limit = 100
 	}
@@ -255,4 +313,50 @@ func LoadHistory(project string, limit int) ([]OperationResult, error) {
 		results[left], results[right] = results[right], results[left]
 	}
 	return results, nil
+}
+
+func openHistory(project string, flags int, create bool) (*os.File, error) {
+	projectFD, err := syscall.Open(project, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer syscall.Close(projectFD)
+	if create {
+		if err := syscall.Mkdirat(projectFD, ".orchard", 0o700); err != nil && !errors.Is(err, syscall.EEXIST) {
+			return nil, err
+		}
+	}
+	directoryFD, err := syscall.Openat(projectFD, ".orchard", syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, fmt.Errorf(".orchard must be a private directory and not a symlink: %w", err)
+	}
+	defer syscall.Close(directoryFD)
+	if err := syscall.Fchmod(directoryFD, 0o700); err != nil {
+		return nil, err
+	}
+	openFlags := flags | syscall.O_CLOEXEC | syscall.O_NOFOLLOW | syscall.O_NONBLOCK
+	fileFD, err := syscall.Openat(directoryFD, "history.jsonl", openFlags, 0)
+	if create && errors.Is(err, syscall.ENOENT) {
+		fileFD, err = syscall.Openat(directoryFD, "history.jsonl", openFlags|syscall.O_CREAT|syscall.O_EXCL, 0o600)
+		if errors.Is(err, syscall.EEXIST) {
+			fileFD, err = syscall.Openat(directoryFD, "history.jsonl", openFlags, 0)
+		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("history.jsonl must be a regular file and not a symlink: %w", err)
+	}
+	var stat syscall.Stat_t
+	if err := syscall.Fstat(fileFD, &stat); err != nil {
+		_ = syscall.Close(fileFD)
+		return nil, err
+	}
+	if stat.Mode&syscall.S_IFMT != syscall.S_IFREG {
+		_ = syscall.Close(fileFD)
+		return nil, errors.New("history.jsonl must be a regular file")
+	}
+	if err := syscall.Fchmod(fileFD, 0o600); err != nil {
+		_ = syscall.Close(fileFD)
+		return nil, err
+	}
+	return os.NewFile(uintptr(fileFD), filepath.Join(project, ".orchard", "history.jsonl")), nil
 }

@@ -3,11 +3,14 @@ package orchard
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 type fakeTools map[string]ToolStatus
@@ -63,7 +66,9 @@ func jsonMarshalIndent(value any) ([]byte, error) {
 }
 
 func TestVerifiedPlanCommands(t *testing.T) {
-	workspace, project := testProject(t, AppStoreIDs{AppID: "1001", VersionID: "2002", BuildID: "3003"})
+	versionID := "a1b2c3d4-1111-4222-8333-abcdef123456"
+	buildID := "b2c3d4e5-2222-4333-8444-bcdefa234567"
+	workspace, project := testProject(t, AppStoreIDs{AppID: "1001", VersionID: versionID, BuildID: buildID})
 	ipa := filepath.Join(workspace, "Demo.ipa")
 	if err := os.WriteFile(ipa, []byte("fixture"), 0o600); err != nil {
 		t.Fatal(err)
@@ -77,13 +82,13 @@ func TestVerifiedPlanCommands(t *testing.T) {
 	}{
 		{"build", PlanInput{Action: "build", Project: project}, [][]string{{"--version"}, {"dev", "build", "--configuration", "debug"}}, false},
 		{"devices", PlanInput{Action: "devices", Project: project}, [][]string{{"devices", "--no-wait"}}, false},
-		{"install", PlanInput{Action: "install", Project: project, IPA: ipa, Device: "abc-123"}, [][]string{{"install", "--udid", "abc-123", ipa}}, false},
+		{"install", PlanInput{Action: "install", Project: project, IPA: ipa, Device: "abc-123"}, [][]string{{"install", "--udid", "abc-123", ipa}}, true},
 		{"launch", PlanInput{Action: "launch", Project: project, Device: "abc-123"}, [][]string{{"launch", "--udid", "abc-123", "com.example.Demo"}}, false},
 		{"export", PlanInput{Action: "export", Project: project}, [][]string{{"dev", "build", "--configuration", "release", "--ipa"}}, false},
-		{"store-status", PlanInput{Action: "store-status", Project: project}, [][]string{{"builds", "info", "--build-id", "3003", "--output", "json"}}, false},
-		{"validate", PlanInput{Action: "validate", Project: project}, [][]string{{"validate", "--app", "1001", "--version-id", "2002", "--platform", "IOS", "--output", "json"}}, false},
+		{"store-status", PlanInput{Action: "store-status", Project: project}, [][]string{{"builds", "info", "--build-id", buildID, "--output", "json"}}, false},
+		{"validate", PlanInput{Action: "validate", Project: project}, [][]string{{"validate", "--app", "1001", "--version-id", versionID, "--platform", "IOS", "--output", "json"}}, false},
 		{"upload", PlanInput{Action: "upload", Project: project, IPA: ipa}, [][]string{{"builds", "upload", "--app", "1001", "--ipa", ipa, "--wait", "--output", "json"}}, true},
-		{"submit", PlanInput{Action: "submit", Project: project}, [][]string{{"review", "submit", "--app", "1001", "--version-id", "2002", "--build-id", "3003", "--platform", "IOS", "--dry-run", "--output", "json"}, {"review", "submit", "--app", "1001", "--version-id", "2002", "--build-id", "3003", "--platform", "IOS", "--confirm", "--output", "json"}}, true},
+		{"submit", PlanInput{Action: "submit", Project: project}, [][]string{{"review", "submit", "--app", "1001", "--version-id", versionID, "--build-id", buildID, "--platform", "IOS", "--dry-run", "--output", "json"}, {"review", "submit", "--app", "1001", "--version-id", versionID, "--build-id", buildID, "--platform", "IOS", "--confirm", "--output", "json"}}, true},
 	}
 	for _, test := range tests {
 		t.Run(test.action, func(t *testing.T) {
@@ -97,6 +102,9 @@ func TestVerifiedPlanCommands(t *testing.T) {
 			if plan.RequiresConfirmation != test.confirm {
 				t.Errorf("confirmation = %t", plan.RequiresConfirmation)
 			}
+			if test.action == "install" && !strings.Contains(strings.Join(plan.Warnings, " "), "does not preserve") {
+				t.Fatal("install plan omitted development-signing warning")
+			}
 			args := make([][]string, len(plan.Steps))
 			for index := range plan.Steps {
 				args[index] = plan.Steps[index].Args
@@ -108,6 +116,151 @@ func TestVerifiedPlanCommands(t *testing.T) {
 				t.Fatalf("args = %#v, want %#v", args, test.want)
 			}
 		})
+	}
+}
+
+func TestPlanIdentityIncludesSkippedDirectoryIPAAndStoredPlanGoesStale(t *testing.T) {
+	workspace, project := testProject(t, AppStoreIDs{AppID: "1001"})
+	if err := os.Mkdir(filepath.Join(project, "xtool"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ipa := filepath.Join(project, "xtool", "Demo.ipa")
+	if err := os.WriteFile(ipa, []byte("same-one"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(workspace, availableTools())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := service.PlanOperation(context.Background(), PlanInput{Action: "upload", Project: project, IPA: ipa}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ipa, []byte("same-two"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RunStored(context.Background(), plan.ID, true); err == nil || !strings.Contains(err.Error(), "changed") {
+		t.Fatalf("same-path, same-size skipped IPA mutation was not stale: %v", err)
+	}
+}
+
+func TestPlanRejectsSpecialAndOversizedProjectFilesWithoutBlocking(t *testing.T) {
+	workspace, project := testProject(t, AppStoreIDs{})
+	fifo := filepath.Join(project, "fixture.fifo")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	planner := Planner{Workspace: workspace, Tools: availableTools()}
+	started := time.Now()
+	if _, err := planner.Plan(context.Background(), PlanInput{Action: "build", Project: project}); err == nil || !strings.Contains(err.Error(), "nonregular") {
+		t.Fatalf("expected FIFO rejection, got %v", err)
+	}
+	if time.Since(started) > time.Second {
+		t.Fatal("FIFO validation blocked")
+	}
+	if err := os.Remove(fifo); err != nil {
+		t.Fatal(err)
+	}
+	large := filepath.Join(project, "oversized.bin")
+	file, err := os.Create(large)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Truncate(maxFingerprintFileBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	_ = file.Close()
+	if _, err := planner.Plan(context.Background(), PlanInput{Action: "build", Project: project}); err == nil || !strings.Contains(err.Error(), "fingerprint limit") {
+		t.Fatalf("expected oversized source rejection, got %v", err)
+	}
+}
+
+func TestPlanBindsExecutableBytesAndEnforcesLinuxPolicy(t *testing.T) {
+	workspace, project := testProject(t, AppStoreIDs{})
+	executable := filepath.Join(workspace, "xtool-fixture")
+	if err := os.WriteFile(executable, []byte("first"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Stat(executable)
+	tools := availableTools()
+	tools["xtool"] = ToolStatus{ID: "xtool", Name: "xtool", Status: "available", Version: "xtool 1.19.0", Path: executable, Detail: "fixture"}
+	planner := Planner{Workspace: workspace, Tools: tools}
+	first, err := planner.Plan(context.Background(), PlanInput{Action: "devices", Project: project})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(executable, []byte("other"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(executable, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	second, err := planner.Plan(context.Background(), PlanInput{Action: "devices", Project: project})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID == second.ID {
+		t.Fatal("same-size executable replacement did not change plan")
+	}
+	blocked, err := (Planner{Workspace: workspace, Tools: tools, HostOS: "darwin"}).Plan(context.Background(), PlanInput{Action: "build", Project: project})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blocked.Executable || !strings.Contains(strings.Join(blocked.Blockers, " "), "only when Orchard is running on Linux") {
+		t.Fatalf("non-Linux build was not blocked: %#v", blocked)
+	}
+}
+
+func TestStoredPlanIsConsumedAfterAttemptAndDuringConcurrentRun(t *testing.T) {
+	workspace, project := testProject(t, AppStoreIDs{})
+	executable := filepath.Join(workspace, "xtool-fixture")
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\nsleep 0.15\nexit 7\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tools := availableTools()
+	tools["xtool"] = ToolStatus{ID: "xtool", Name: "xtool", Status: "available", Path: executable, Detail: "fixture"}
+	service, err := NewService(workspace, tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := service.PlanOperation(context.Background(), PlanInput{Action: "devices", Project: project}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan OperationResult, 1)
+	go func() {
+		result, _ := service.RunStored(context.Background(), plan.ID, false)
+		done <- result
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		service.mu.Lock()
+		_, stillStored := service.plans[plan.ID]
+		service.mu.Unlock()
+		if !stillStored {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("first run did not reserve the stored plan")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if _, err := service.RunStored(context.Background(), plan.ID, false); err == nil || !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("concurrent replay was accepted: %v", err)
+	}
+	result := <-done
+	if result.ExitCode != 7 || result.Status != "failed" {
+		t.Fatalf("failed attempt result = %#v", result)
+	}
+	if _, err := service.RunStored(context.Background(), plan.ID, false); err == nil {
+		t.Fatal("sequential replay was accepted")
+	}
+	replanned, err := service.PlanOperation(context.Background(), PlanInput{Action: "devices", Project: project}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RunStored(context.Background(), replanned.ID, false); err != nil {
+		t.Fatalf("explicit re-planning did not create a new attempt: %v", err)
 	}
 }
 
@@ -182,5 +335,14 @@ func TestPlanRejectsProjectSymlink(t *testing.T) {
 	planner := Planner{Workspace: workspace, Tools: availableTools()}
 	if _, err := planner.Plan(context.Background(), PlanInput{Action: "build", Project: project}); err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("expected project symlink rejection, got %v", err)
+	}
+}
+
+func TestPlanFingerprintHonorsCanceledContext(t *testing.T) {
+	workspace, project := testProject(t, AppStoreIDs{})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := (Planner{Workspace: workspace, Tools: availableTools()}).Plan(ctx, PlanInput{Action: "build", Project: project}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled fingerprint returned %v", err)
 	}
 }

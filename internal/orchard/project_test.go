@@ -4,7 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestCreateProjectTemplateAndNonOverwrite(t *testing.T) {
@@ -82,6 +84,71 @@ func TestManifestRejectsUnknownAndUnsupportedValues(t *testing.T) {
 	}
 	if _, _, err := LoadManifest(project); err == nil || !strings.Contains(err.Error(), "unsupported") {
 		t.Fatalf("expected schema rejection, got %v", err)
+	}
+}
+
+func TestManifestAcceptsResourceIDsAndRejectsControlLikeIDs(t *testing.T) {
+	manifest := Manifest{
+		SchemaVersion: 1, Name: "Demo", BundleIdentifier: "com.example.Demo",
+		DeviceFamilies: []string{"iphone", "ipad"}, MinimumIOSVersion: "17.0",
+		MarketingVersion: "1.2.3", BuildNumber: "4",
+		AppStore: AppStoreIDs{AppID: "123456789", VersionID: "a1b2c3d4-1111-4222-8333-abcdef123456", BuildID: "build_RESOURCE-123"},
+	}
+	if err := ValidateManifest(manifest); err != nil {
+		t.Fatalf("realistic resource IDs rejected: %v", err)
+	}
+	for _, bad := range []string{"--version", "../escape", "with/slash", "line\nbreak", strings.Repeat("a", 129)} {
+		manifest.AppStore.VersionID = bad
+		if err := ValidateManifest(manifest); err == nil {
+			t.Errorf("unsafe resource ID %q was accepted", bad)
+		}
+	}
+}
+
+func TestLoadManifestRejectsFIFOAndOversizeWithoutBlocking(t *testing.T) {
+	project := t.TempDir()
+	path := filepath.Join(project, "orchard.json")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	if _, _, err := LoadManifest(project); err == nil {
+		t.Fatal("FIFO manifest was accepted")
+	}
+	if time.Since(started) > time.Second {
+		t.Fatal("FIFO manifest read blocked")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Truncate(maxManifestBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	_ = file.Close()
+	if _, _, err := LoadManifest(project); err == nil || !strings.Contains(err.Error(), "limit") {
+		t.Fatalf("oversized manifest was not rejected: %v", err)
+	}
+}
+
+func TestLoadManifestRejectsSymlinkWithoutChangingTarget(t *testing.T) {
+	project := t.TempDir()
+	target := filepath.Join(t.TempDir(), "manifest-target")
+	if err := os.WriteFile(target, []byte("preserve"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(project, "orchard.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := LoadManifest(project); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("manifest symlink was not rejected: %v", err)
+	}
+	contents, _ := os.ReadFile(target)
+	if string(contents) != "preserve" {
+		t.Fatal("manifest symlink target changed")
 	}
 }
 

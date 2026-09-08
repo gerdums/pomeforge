@@ -69,6 +69,9 @@ func (r SystemToolResolver) probeDefinition(ctx context.Context, definition tool
 	if absolute, absErr := filepath.Abs(path); absErr == nil {
 		path = absolute
 	}
+	if resolved, resolveErr := filepath.EvalSymlinks(path); resolveErr == nil {
+		path = resolved
+	}
 	status.Path = path
 	timeout := r.Timeout
 	if timeout <= 0 {
@@ -79,11 +82,13 @@ func (r SystemToolResolver) probeDefinition(ctx context.Context, definition tool
 	var output cappedBuffer
 	output.limit = 4096
 	cmd := exec.CommandContext(probeCtx, path, definition.versionArgs...)
-	cmd.Env = ChildEnvironment()
+	cmd.Env = ChildEnvironmentFor(EnvironmentProbe)
 	cmd.Stdout = &output
 	cmd.Stderr = &output
+	configureProcessGroup(cmd)
 	err = cmd.Run()
-	version := strings.TrimSpace(output.String())
+	killProcessGroup(cmd)
+	version := strings.TrimSpace(redactOutput(output.String()))
 	version = strings.Join(strings.Fields(version), " ")
 	if len(version) > 240 {
 		version = version[:240] + "…"
@@ -101,9 +106,9 @@ func (r SystemToolResolver) probeDefinition(ctx context.Context, definition tool
 	}
 	status.Status = "available"
 	status.Detail = "verified by executing " + definition.executable + " " + strings.Join(definition.versionArgs, " ")
-	if definition.id == "xtool" && !regexp.MustCompile(`(?i)xtool\s+1\.`).MatchString(version) {
-		status.Status = "incompatible"
-		status.Detail = "Orchard has verified xtool 1.x command contracts; found a different version"
+	if definition.id == "xtool" && !regexp.MustCompile(`(?i)^xtool\s+1\.19\.0(?:\s|$)`).MatchString(version) {
+		status.Status = "unverified"
+		status.Detail = "Orchard has verified only xtool 1.19.0 command contracts; this version is not verified"
 	}
 	if definition.id == "asc" && !regexp.MustCompile(`(?i)(?:asc[^0-9]*)?5\.[0-9]+`).MatchString(version) {
 		status.Status = "incompatible"

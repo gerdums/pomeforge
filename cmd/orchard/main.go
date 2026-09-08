@@ -61,10 +61,20 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return command.fail(err, 2)
 	}
+	if len(filtered) == 1 && (filtered[0] == "--help" || filtered[0] == "-h" || filtered[0] == "help") {
+		return command.success(map[string]string{"help": generalHelp()}, generalHelp())
+	}
 	if len(filtered) == 0 {
-		return command.fail(orchard.Errorf("usage", "a command is required; run `orchard schema --json` to discover commands"), 2)
+		return command.fail(orchard.Errorf("usage", "a command is required; run `orchard --help` or `orchard schema --json`"), 2)
 	}
 	name, args := filtered[0], filtered[1:]
+	if isHelpRequest(name, args) {
+		help, ok := commandHelp(name)
+		if !ok {
+			return command.fail(orchard.Errorf("unknown_command", "unknown command: "+name), 2)
+		}
+		return command.success(map[string]string{"help": help}, help)
+	}
 	switch name {
 	case "version":
 		if len(args) != 0 {
@@ -107,6 +117,59 @@ func extractJSONFlag(arguments []string) ([]string, bool, error) {
 		filtered = append(filtered, argument)
 	}
 	return filtered, jsonMode, nil
+}
+
+func isHelpRequest(command string, args []string) bool {
+	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
+		return true
+	}
+	if (command == "plan" || command == "run") && len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
+		_, known := actionByName(args[0])
+		return known
+	}
+	return false
+}
+
+func actionByName(name string) (orchard.ActionInfo, bool) {
+	for _, action := range orchard.Actions() {
+		if action.ID == name {
+			return action, true
+		}
+	}
+	return orchard.ActionInfo{}, false
+}
+
+func generalHelp() string {
+	return `Orchard — local Linux workspace for Swift iPhone and iPad development
+
+Usage: orchard [--json] COMMAND [options]
+
+Commands:
+  version                 Print Orchard's version
+  schema                  Print the machine-readable command/action schema
+  init NAME               Create a project (--bundle-id is required)
+  doctor                  Inspect tools and capabilities
+  tools                   Inspect supported tool executables
+  plan ACTION             Inspect an action without executing it
+  run ACTION              Execute with --execute; signing/account effects need --confirm
+  app                     Serve the authenticated loopback workspace
+
+Run orchard COMMAND --help for command flags and effects.`
+}
+
+func commandHelp(name string) (string, bool) {
+	help := map[string]string{
+		"version": "Usage: orchard version [--json]\nPrint Orchard's version. Effect: none.",
+		"schema":  "Usage: orchard schema [--json]\nPrint commands, flags, actions, effects, and confirmation requirements.",
+		"init":    "Usage: orchard init NAME [--dir PATH] --bundle-id ID [--json]\nCreate a SwiftUI project without overwriting an existing path. Effect: filesystem write.",
+		"doctor":  "Usage: orchard doctor [--json]\nRun bounded credential-free tool probes and report capability prerequisites. Effect: local read.",
+		"tools":   "Usage: orchard tools [--json]\nRun bounded credential-free version probes. Effect: local read.",
+		"plan":    "Usage: orchard plan ACTION --project PATH [--ipa PATH] [--device ID] [--json]\nActions: setup, build, devices, install, launch, export, store-status, validate, upload, submit.\nInspect exact argv, warnings, blockers, effects, and confirmation needs without executing.",
+		"run":     "Usage: orchard run ACTION --project PATH --execute [--ipa PATH] [--device ID] [--confirm] [--json]\nActions: setup, build, devices, install, launch, export, store-status, validate, upload, submit.\nExecute a regenerated plan. --confirm is required for App Store writes and xtool install/dev-run signing effects.",
+		"app":     "Usage: orchard app [--workspace PATH] [--listen 127.0.0.1:PORT] [--open] [--json]\nServe the token-authenticated loopback workspace; --open invokes xdg-open without account secrets.",
+	}
+	value, ok := help[name]
+	return value, ok
 }
 
 func (c *cli) init(args []string) int {

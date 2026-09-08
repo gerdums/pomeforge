@@ -5,23 +5,32 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 )
 
 var devicePattern = regexp.MustCompile(`^[A-Za-z0-9-]{1,128}$`)
 
+const (
+	maxFingerprintFileBytes  = 64 << 20
+	maxFingerprintTotalBytes = 512 << 20
+	maxIPAFingerprintBytes   = 8 << 30
+	maxToolFingerprintBytes  = 256 << 20
+)
+
 var actionCatalog = []ActionInfo{
 	{ID: "setup", Title: "Inspect setup", Description: "Inspect the installed Swift SDK setup and explain manual requirements.", Effect: "local-read"},
 	{ID: "build", Title: "Build debug app", Description: "Compile a debug device application with xtool.", Effect: "local-build"},
 	{ID: "devices", Title: "List devices", Description: "Enumerate connected devices without waiting.", Effect: "device-read"},
-	{ID: "install", Title: "Install on device", Description: "Install an IPA or build and run a debug app on a selected device.", Effect: "device-write"},
+	{ID: "install", Title: "Install on device", Description: "Provision/development-sign and install an IPA, or build and run a debug app on a selected device.", Effect: "device-write", RequiresConfirmation: true},
 	{ID: "launch", Title: "Launch on device", Description: "Launch the project bundle identifier on a selected device.", Effect: "device-write"},
 	{ID: "export", Title: "Export unsigned IPA", Description: "Produce an unsigned release-workflow IPA; this is not App Store distribution signing.", Effect: "local-build"},
 	{ID: "store-status", Title: "Inspect store build", Description: "Read App Store Connect build status for the configured build ID.", Effect: "account-read"},
@@ -48,6 +57,7 @@ func actionByID(id string) (ActionInfo, bool) {
 type Planner struct {
 	Workspace string
 	Tools     ToolResolver
+	HostOS    string
 }
 
 func (p Planner) Plan(ctx context.Context, input PlanInput) (Plan, error) {
@@ -81,9 +91,16 @@ func (p Planner) Plan(ctx context.Context, input PlanInput) (Plan, error) {
 		Action: input.Action, Title: action.Title, Steps: []Step{}, Blockers: []string{}, Warnings: []string{},
 		RequiresConfirmation: action.RequiresConfirmation, Effect: action.Effect,
 	}
+	hostOS := p.HostOS
+	if hostOS == "" {
+		hostOS = runtime.GOOS
+	}
+	if actionRequiresLinux(input.Action) && hostOS != "linux" {
+		plan.Blockers = append(plan.Blockers, "this compile, signing, or export workflow is supported only when Orchard is running on Linux")
+	}
 	requiredTools := []string{}
 	addToolStep := func(tool, description string, args ...string) {
-		status := p.Tools.Probe(ctx, tool)
+		status := canonicalToolStatus(p.Tools.Probe(ctx, tool))
 		requiredTools = append(requiredTools, tool)
 		if status.Status != "available" {
 			plan.Blockers = append(plan.Blockers, fmt.Sprintf("%s is %s: %s (install: %s)", status.Name, status.Status, status.Detail, status.InstallURL))
@@ -111,6 +128,8 @@ func (p Planner) Plan(ctx context.Context, input PlanInput) (Plan, error) {
 		} else {
 			addToolStep("xtool", "Build, install, and run a debug app on the selected device.", "dev", "run", "--configuration", "debug", "--udid", input.Device)
 		}
+		plan.Warnings = append(plan.Warnings, "xtool install/dev run may provision or development-sign the app and change its signing identity; it does not preserve or produce an App Store distribution signature.")
+		plan.Warnings = append(plan.Warnings, "Build hooks and Swift package plugins run with the invoking user's authority.")
 	case "launch":
 		if input.Device == "" {
 			plan.Blockers = append(plan.Blockers, "a device ID is required; pass --device after inspecting the devices action")
@@ -158,7 +177,7 @@ func (p Planner) Plan(ctx context.Context, input PlanInput) (Plan, error) {
 		plan.Warnings = append(plan.Warnings, "ASC account authentication is resolved from private user configuration and is validated by ASC at execution time.")
 	}
 	plan.Executable = len(plan.Blockers) == 0 && len(plan.Steps) > 0
-	fingerprint, err := p.fingerprint(project, input, requiredTools)
+	fingerprint, err := p.fingerprint(ctx, project, input, requiredTools)
 	if err != nil {
 		return Plan{}, err
 	}
@@ -188,20 +207,34 @@ func (p Planner) validateIPA(requested string) (string, error) {
 	if !strings.EqualFold(filepath.Ext(path), ".ipa") {
 		return "", Errorf("invalid_ipa", "IPA path must end in .ipa")
 	}
-	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() {
+	file, err := openRegularWithin(p.Workspace, path, os.O_RDONLY, 0)
+	if err != nil {
 		return "", Errorf("invalid_ipa", "IPA path must be a regular file")
 	}
+	_ = file.Close()
 	return path, nil
 }
 
-func (p Planner) fingerprint(project string, input PlanInput, tools []string) (string, error) {
+func actionRequiresLinux(action string) bool {
+	switch action {
+	case "build", "resources", "sign", "export", "install":
+		return true
+	default:
+		return false
+	}
+}
+
+func (p Planner) fingerprint(ctx context.Context, project string, input PlanInput, tools []string) (string, error) {
 	h := sha256.New()
-	_, _ = io.WriteString(h, "orchard-plan-v1\x00")
+	_, _ = io.WriteString(h, "orchard-plan-v2\x00")
 	encodedInput, _ := json.Marshal(input)
 	_, _ = h.Write(encodedInput)
 	_, _ = io.WriteString(h, "\x00")
+	var projectBytes int64
 	err := filepath.WalkDir(project, func(path string, entry fs.DirEntry, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if walkErr != nil {
 			return walkErr
 		}
@@ -215,12 +248,19 @@ func (p Planner) fingerprint(project string, input PlanInput, tools []string) (s
 		if entry.IsDir() {
 			return nil
 		}
-		_, _ = io.WriteString(h, filepath.ToSlash(rel)+"\x00")
-		file, err := os.Open(path)
+		info, err := entry.Info()
 		if err != nil {
 			return err
 		}
-		_, copyErr := io.Copy(h, file)
+		if !info.Mode().IsRegular() {
+			return Errorf("invalid_project", "project contains a nonregular file: "+rel)
+		}
+		_, _ = io.WriteString(h, filepath.ToSlash(rel)+"\x00")
+		file, err := openRegularWithin(project, path, os.O_RDONLY, 0)
+		if err != nil {
+			return err
+		}
+		copyErr := hashBounded(ctx, h, file, maxFingerprintFileBytes, &projectBytes, maxFingerprintTotalBytes)
 		closeErr := file.Close()
 		if copyErr != nil {
 			return copyErr
@@ -230,13 +270,14 @@ func (p Planner) fingerprint(project string, input PlanInput, tools []string) (s
 	if err != nil {
 		return "", err
 	}
-	if input.IPA != "" && !strings.HasPrefix(input.IPA, project+string(filepath.Separator)) {
+	if input.IPA != "" {
 		_, _ = io.WriteString(h, "ipa\x00"+input.IPA+"\x00")
-		ipa, openErr := os.Open(input.IPA)
+		ipa, openErr := openRegularWithin(p.Workspace, input.IPA, os.O_RDONLY, 0)
 		if openErr != nil {
 			return "", openErr
 		}
-		_, copyErr := io.Copy(h, ipa)
+		var ipaBytes int64
+		copyErr := hashBounded(ctx, h, ipa, maxIPAFingerprintBytes, &ipaBytes, maxIPAFingerprintBytes)
 		closeErr := ipa.Close()
 		if copyErr != nil {
 			return "", copyErr
@@ -255,14 +296,76 @@ func (p Planner) fingerprint(project string, input PlanInput, tools []string) (s
 	}
 	sort.Strings(toolIDs)
 	for _, id := range toolIDs {
-		status := p.Tools.Probe(context.Background(), id)
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		status := canonicalToolStatus(p.Tools.Probe(ctx, id))
 		encoded, _ := json.Marshal(status)
 		_, _ = h.Write(encoded)
 		if status.Path != "" {
-			if info, statErr := os.Stat(status.Path); statErr == nil {
-				_, _ = io.WriteString(h, fmt.Sprintf("\x00%d\x00%d", info.Size(), info.ModTime().UnixNano()))
+			file, openErr := openRegularAbsolute(status.Path)
+			if openErr == nil {
+				_, _ = io.WriteString(h, "\x00tool-bytes\x00")
+				var toolBytes int64
+				copyErr := hashBounded(ctx, h, file, maxToolFingerprintBytes, &toolBytes, maxToolFingerprintBytes)
+				closeErr := file.Close()
+				if copyErr != nil {
+					return "", fmt.Errorf("fingerprint %s executable: %w", id, copyErr)
+				}
+				if closeErr != nil {
+					return "", closeErr
+				}
+			} else if _, statErr := os.Lstat(status.Path); statErr == nil {
+				return "", fmt.Errorf("fingerprint %s executable: %w", id, openErr)
 			}
 		}
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func canonicalToolStatus(status ToolStatus) ToolStatus {
+	if status.Path != "" {
+		if resolved, err := filepath.EvalSymlinks(status.Path); err == nil {
+			status.Path = resolved
+		}
+	}
+	return status
+}
+
+func hashBounded(ctx context.Context, destination io.Writer, source *os.File, perFileLimit int64, total *int64, totalLimit int64) error {
+	info, err := source.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("file is not regular")
+	}
+	if info.Size() > perFileLimit {
+		return fmt.Errorf("file exceeds the %d-byte fingerprint limit", perFileLimit)
+	}
+	if *total > totalLimit-info.Size() {
+		return fmt.Errorf("files exceed the %d-byte total fingerprint limit", totalLimit)
+	}
+	buffer := make([]byte, 128*1024)
+	var read int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		n, readErr := source.Read(buffer)
+		if n > 0 {
+			read += int64(n)
+			if read > perFileLimit || *total > totalLimit-int64(n) {
+				return errors.New("file changed while reading and exceeded fingerprint limits")
+			}
+			_, _ = destination.Write(buffer[:n])
+			*total += int64(n)
+		}
+		if errors.Is(readErr, io.EOF) {
+			return nil
+		}
+		if readErr != nil {
+			return readErr
+		}
+	}
 }

@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 var (
@@ -21,7 +22,10 @@ var (
 	versionPattern     = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+){1,2}$`)
 	buildPattern       = regexp.MustCompile(`^[1-9][0-9]*$`)
 	identifierPattern  = regexp.MustCompile(`^[0-9]+$`)
+	resourceIDPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 )
+
+const maxManifestBytes = 1 << 20
 
 func CanonicalWorkspace(path string) (string, error) {
 	if path == "" {
@@ -140,9 +144,12 @@ func ValidateManifest(m Manifest) error {
 	if !buildPattern.MatchString(m.BuildNumber) {
 		return Errorf("invalid_manifest", "buildNumber must be a positive integer string")
 	}
-	for label, value := range map[string]string{"appId": m.AppStore.AppID, "versionId": m.AppStore.VersionID, "buildId": m.AppStore.BuildID} {
-		if value != "" && !identifierPattern.MatchString(value) {
-			return Errorf("invalid_manifest", label+" must be a numeric App Store Connect resource ID")
+	if m.AppStore.AppID != "" && !identifierPattern.MatchString(m.AppStore.AppID) {
+		return Errorf("invalid_manifest", "appId must be a numeric App Store Connect app ID")
+	}
+	for label, value := range map[string]string{"versionId": m.AppStore.VersionID, "buildId": m.AppStore.BuildID} {
+		if value != "" && !resourceIDPattern.MatchString(value) {
+			return Errorf("invalid_manifest", label+" must be a safe App Store Connect resource ID")
 		}
 	}
 	return nil
@@ -150,12 +157,27 @@ func ValidateManifest(m Manifest) error {
 
 func LoadManifest(project string) (Manifest, []byte, error) {
 	path := filepath.Join(project, "orchard.json")
-	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		return Manifest{}, nil, Errorf("symlink_not_allowed", "orchard.json must not be a symlink")
-	}
-	raw, err := os.ReadFile(path)
+	file, err := openRegularWithin(project, path, os.O_RDONLY, 0)
 	if err != nil {
+		if errors.Is(err, syscall.ELOOP) {
+			return Manifest{}, nil, Errorf("symlink_not_allowed", "orchard.json must not be a symlink")
+		}
 		return Manifest{}, nil, Errorf("manifest_not_found", "read orchard.json: "+err.Error())
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return Manifest{}, nil, Errorf("invalid_manifest", "inspect orchard.json: "+err.Error())
+	}
+	if info.Size() > maxManifestBytes {
+		return Manifest{}, nil, Errorf("invalid_manifest", fmt.Sprintf("orchard.json exceeds the %d-byte limit", maxManifestBytes))
+	}
+	raw, err := io.ReadAll(io.LimitReader(file, maxManifestBytes+1))
+	if err != nil {
+		return Manifest{}, nil, Errorf("invalid_manifest", "read orchard.json: "+err.Error())
+	}
+	if len(raw) > maxManifestBytes {
+		return Manifest{}, nil, Errorf("invalid_manifest", fmt.Sprintf("orchard.json exceeds the %d-byte limit", maxManifestBytes))
 	}
 	var manifest Manifest
 	decoder := json.NewDecoder(bytes.NewReader(raw))

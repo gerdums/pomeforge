@@ -12,7 +12,13 @@ Go 1.24 or newer is required to build Orchard itself.
 ```sh
 make check
 ./bin/orchard version
+./bin/orchard --help
 ```
+
+The provided `make test`, `make vet`, `make build`, and `make cross-check`
+entrypoints require a Linux host, reject a non-Linux `HOSTS` value, and set
+`GOOS=linux`. Compile, resource, signing, export, and install workflows are also
+blocked by Orchard itself when its runtime is not Linux.
 
 Start the browser workspace on an automatically selected loopback port:
 
@@ -88,21 +94,34 @@ orchard plan build --project ./Garden
 orchard run build --project ./Garden --execute
 
 orchard plan install --project ./Garden --device DEVICE_UDID --ipa ./Garden.ipa
-orchard run install --project ./Garden --device DEVICE_UDID --ipa ./Garden.ipa --execute
+orchard run install --project ./Garden --device DEVICE_UDID --ipa ./Garden.ipa --execute --confirm
 ```
 
-`run` always requires `--execute`. App Store account writes also require
-`--confirm`. Browser callers submit only action/project/input data to `/api/plan`
+`run` always requires `--execute`. App Store account writes and xtool
+install/dev-run operations also require `--confirm`, because xtool may provision
+or development-sign the app and change its signing identity. It must not be used
+to claim preservation of an App Store distribution signature. Browser callers
+submit only action/project/input data to `/api/plan`
 and later submit a server-held `planId` to `/api/run`; they cannot supply an
 executable or argv. Changed sources, manifests, tool state, or IPA content make a
-stored plan stale and require a new inspection.
+stored plan stale and require a new inspection. A server-held plan is consumed
+atomically by its first run attempt, successful or failed; an explicit planning
+request is required before another attempt.
+
+Fingerprints stream regular files through no-follow, workspace-confined opens.
+They bind a selected IPA even when it is below skipped build-state directories,
+and bind planned executable bytes when the executable is an accessible regular
+file. Source inputs are limited to 64 MiB each and 512 MiB total, selected IPAs
+to 8 GiB, and tool executables to 256 MiB. This content binding detects local
+replacement between planning attempts; checksum verification for Orchard-managed
+tool installation remains the bootstrap layer's responsibility.
 
 | Action | Effect | Command boundary |
 | --- | --- | --- |
 | `setup` | local read | `swift --version`; `xtool sdk status`; manual Xcode archive guidance |
 | `build` | local build | `xtool dev build --configuration debug` |
 | `devices` | device read | `xtool devices --no-wait` |
-| `install` | device write | `xtool install --udid DEVICE PATH`, or `xtool dev run --configuration debug --udid DEVICE` without `--ipa` |
+| `install` | confirmed device/signing write | `xtool install --udid DEVICE PATH`, or `xtool dev run --configuration debug --udid DEVICE` without `--ipa`; may provision/development-sign and change signing identity |
 | `launch` | device write | `xtool launch --udid DEVICE BUNDLE_ID` |
 | `export` | local build | `xtool dev build --configuration release --ipa` (unsigned) |
 | `store-status` | account read | `asc builds info --build-id BUILD_ID --output json` |
@@ -126,17 +145,31 @@ Read-only validation and account writes use resource IDs from `orchard.json`:
 {
   "appStore": {
     "appId": "123456789",
-    "versionId": "987654321",
-    "buildId": "456789123"
+    "versionId": "a1b2c3d4-1111-4222-8333-abcdef123456",
+    "buildId": "b2c3d4e5-2222-4333-8444-bcdefa234567"
   }
 }
 ```
 
-These are identifiers, not credentials. ASC authentication remains in its
-private user configuration. Orchard passes a narrow child environment including
-`HOME`, `PATH`, XDG locations, and ASC settings, disables ASC telemetry for
-managed subprocesses, caps and redacts retained output, and stores operation
-history in private `.orchard/history.jsonl` files.
+`appId` is numeric. ASC version/build resource IDs may be numeric or safe
+UUID/resource strings; flag-like values, path separators, controls, and
+overlong IDs are rejected. These are identifiers, not credentials.
+
+ASC authentication remains in its private user configuration. Credential-free
+tool probes, Swift/build tools, ASC operations, and `xdg-open` each receive a
+separate allowlisted environment. Only ASC operations inherit `ASC_*`; the
+browser opener retains display/session variables without account credentials.
+Build hooks still run with the invoking user's authority—this environment
+filter is not an operating-system sandbox.
+
+Managed processes use Linux process groups, deadlines, and bounded pipe waits so
+descendants cannot keep an operation or version probe alive indefinitely.
+Output is capped and redacted for PEM blocks, bearer/JWT tokens, known credential
+environment values, and presigned URL queries before CLI/API exposure or private
+history storage. `orchard.json` is limited to 1 MiB, and history reads reject
+nonregular files and files above 8 MiB. If an operation runs and a later history
+append fails because the file changed concurrently, the result remains available
+with a redacted `history warning` in its output.
 
 ## Verification boundary
 

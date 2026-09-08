@@ -14,6 +14,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"path"
 	"path/filepath"
@@ -63,7 +64,7 @@ func (a *API) Handler() http.Handler {
 
 func (a *API) validateRequest(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !allowedHost(r.Host) {
+		if !allowedAuthority(r.Host, a.AllowedOrigin) {
 			writeError(w, http.StatusForbidden, orchard.Errorf("invalid_host", "foreign Host header rejected"))
 			return
 		}
@@ -94,10 +95,18 @@ func (a *API) securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-func allowedHost(value string) bool {
-	host := value
-	if parsed, _, err := net.SplitHostPort(value); err == nil {
-		host = parsed
+func allowedAuthority(value, expectedOrigin string) bool {
+	expected, err := url.Parse(expectedOrigin)
+	if err != nil || expected.Scheme != "http" || expected.Path != "" || expected.RawQuery != "" || expected.Fragment != "" {
+		return false
+	}
+	_, expectedPort, err := net.SplitHostPort(expected.Host)
+	if err != nil || expectedPort == "" {
+		return false
+	}
+	host, port, err := net.SplitHostPort(value)
+	if err != nil || port != expectedPort {
+		return false
 	}
 	host = strings.Trim(host, "[]")
 	return host == "127.0.0.1" || host == "localhost" || host == "::1"
@@ -316,7 +325,7 @@ func ServeApp(ctx context.Context, service *orchard.Service, options AppOptions)
 			fmt.Fprintln(warnings, "Warning: xdg-open is unavailable; open the Orchard app URL manually.")
 		} else {
 			command := exec.Command(path, appURL)
-			command.Env = orchard.ChildEnvironment()
+			command.Env = orchard.ChildEnvironmentFor(orchard.EnvironmentBrowser)
 			if startErr := command.Start(); startErr != nil {
 				fmt.Fprintln(warnings, "Warning: the browser opener could not start; open the Orchard app URL manually.")
 			} else {
