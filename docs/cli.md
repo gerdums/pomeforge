@@ -79,12 +79,46 @@ orchard doctor
 orchard tools --json
 ```
 
-These commands execute bounded version probes for `xtool`, `swift`, `asc`,
-`zsign`, `idevice_id`, and `usbmuxd`. Missing, incompatible, and unverified tools
-remain explicit and include upstream installation URLs. Orchard never pipes an
-installer into a shell, invokes `sudo`, or downloads Apple's SDK. SDK setup needs
-a user-obtained Xcode archive and the explicit upstream command
-`xtool sdk install /path/to/Xcode.xip`.
+These commands execute bounded version probes and verify managed tool receipts.
+Missing, incompatible, and unverified tools remain explicit and include upstream
+installation URLs. Orchard never pipes an installer into a shell, invokes
+`sudo`, or downloads Apple's SDK.
+
+## Install tools and import an SDK
+
+Inspect each pinned download before requesting installation:
+
+```sh
+orchard tools install xtool --json
+orchard tools install xtool --execute
+orchard tools install asc --execute
+orchard tools install zsign --execute
+```
+
+Installation verifies the selected archive's size and SHA-256 and stores the
+tool in private XDG state. It does not change the shell's global `PATH`.
+Subsequent Orchard operations discover verified managed tools directly.
+
+Swift 6.3 or newer and the separately built unxip helper are needed for XIP
+import. The [Linux container](container.md) includes Swift, unxip and the
+AssetKit bridge, and documents registering the bundled helpers. The
+[native setup guide](setup.md) covers installation without a container.
+
+```sh
+orchard tools register unxip --path /path/to/unxip \
+  --source-revision 6c3990517fcc4c1db6952fccf4c562fb14097601 --execute
+orchard sdk import --input /path/to/Xcode.xip --arch x86_64 --json
+orchard sdk import --input /path/to/Xcode.xip --arch x86_64 --execute
+orchard sdk status --execute --json
+```
+
+Use `x86_64` for a Linux amd64 host and `arm64` for a Linux arm64 host. An
+extracted `Xcode.app` directory is also accepted. Keep the same explicit XDG
+configuration across import and later builds. Orchard extracts into fresh
+private state, stages the SDK and Clang headers with user ownership, and calls
+native `swift sdk install`. Existing SDKs are preserved; replacement is refused.
+The [toolchain decisions](linux-toolchain-decisions.md) explain why the upstream
+`xtool sdk install` path is not used.
 
 ## Inspect and run actions
 
