@@ -48,6 +48,8 @@ func TestInspectIPARejectsUnsafeArchives(t *testing.T) {
 		{"duplicate", "duplicate_archive_entry", []zipEntry{{"Payload/Orchard.app/Info.plist", fixtureInfo(t, false), 0o600}}, false},
 		{"symlink", "unsafe_archive_entry_type", []zipEntry{{"Payload/Orchard.app/link", []byte("target"), os.ModeSymlink | 0o777}}, false},
 		{"nested extension", "unsupported_nested_extension", []zipEntry{{"Payload/Orchard.app/PlugIns/Widget.appex/Info.plist", []byte("x"), 0o600}}, false},
+		{"extraneous top-level", "unsupported_archive_entry", []zipEntry{{"scratch/private-key.pem", []byte("secret"), 0o600}}, false},
+		{"framework", "unsupported_nested_framework", []zipEntry{{"Payload/Orchard.app/Frameworks/Kit.framework/Kit", []byte("x"), 0o700}}, false},
 		{"multiple apps", "main_bundle_count", []zipEntry{{"Payload/Other.app/Info.plist", fixtureInfo(t, false), 0o600}}, false},
 		{"missing app", "main_bundle_count", []zipEntry{{"metadata", []byte("x"), 0o600}}, true},
 	}
@@ -66,6 +68,55 @@ func TestInspectIPARejectsUnsafeArchives(t *testing.T) {
 				t.Fatal(err)
 			}
 			if !hasProblem(result.Problems, tc.code) || result.Value.StructureValid {
+				t.Fatalf("missing %s: %+v", tc.code, result.Problems)
+			}
+		})
+	}
+}
+
+func TestInspectIPARejectsUnsafePermissionsAndIconBytes(t *testing.T) {
+	f := newCryptoFixture(t)
+	for _, tc := range []struct {
+		name, code string
+		mutate     func([]zipEntry) []zipEntry
+	}{
+		{"non-executable main", "unsafe_archive_executable_mode", func(entries []zipEntry) []zipEntry {
+			for i := range entries {
+				if entries[i].name == "Payload/Orchard.app/Orchard" {
+					entries[i].mode = 0o666
+				}
+			}
+			return entries
+		}},
+		{"non-traversable directory", "unsafe_archive_directory_mode", func(entries []zipEntry) []zipEntry {
+			return append(entries, zipEntry{"Payload/Orchard.app/Resources/", nil, os.ModeDir | 0o600})
+		}},
+		{"malformed icon", "invalid_icon_png", func(entries []zipEntry) []zipEntry {
+			for i := range entries {
+				if entries[i].name == "Payload/Orchard.app/AppIcon60x60@3x.png" {
+					entries[i].data = []byte("not-png")
+				}
+			}
+			return entries
+		}},
+		{"missing marketing icon", "missing_icon_file", func(entries []zipEntry) []zipEntry {
+			var kept []zipEntry
+			for _, entry := range entries {
+				if entry.name != "Payload/Orchard.app/AppIcon1024x1024.png" {
+					kept = append(kept, entry)
+				}
+			}
+			return kept
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ipa := filepath.Join(t.TempDir(), "bad.ipa")
+			writeIPA(t, ipa, tc.mutate(validIPAEntries(t, f.profile(t, profileOptions{}), false)))
+			result, err := InspectIPA(context.Background(), ipa, InspectionOptions{CurrentTime: f.now})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Valid() || !hasProblem(result.Problems, tc.code) {
 				t.Fatalf("missing %s: %+v", tc.code, result.Problems)
 			}
 		})

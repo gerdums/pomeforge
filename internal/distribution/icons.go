@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image/png"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -63,44 +65,24 @@ func validateIconCatalog(ctx context.Context, catalog string, limits Limits) []P
 	if err := requireAbsoluteCleanPath("assetCatalogPath", catalog); err != nil {
 		return []Problem{problem("invalid_catalog_path", "assetCatalogPath", err.Error())}
 	}
-	if err := rejectSymlinkPath(catalog, true); err != nil {
-		return []Problem{problem("unsafe_catalog", "assetCatalogPath", err.Error())}
-	}
-	info, err := os.Lstat(catalog)
-	if err != nil || !info.IsDir() {
+	root, err := openDirectoryNoFollow(catalog)
+	if err != nil {
 		return []Problem{problem("invalid_catalog", "assetCatalogPath", "asset catalog must be a directory")}
 	}
+	_ = root.Close()
 	var appIconSets []string
-	entries := 0
 	var total int64
-	err = filepath.WalkDir(catalog, func(name string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-		entries++
-		if entries > limits.MaxArchiveEntries {
-			return fmt.Errorf("catalog exceeds %d-entry limit", limits.MaxArchiveEntries)
-		}
-		entryInfo, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if entryInfo.Mode()&os.ModeSymlink != 0 || (!entryInfo.IsDir() && !entryInfo.Mode().IsRegular()) {
-			return fmt.Errorf("catalog contains nonregular entry %q", name)
-		}
+	err = walkRegularTree(ctx, catalog, limits.MaxArchiveEntries, func(rel string, entryInfo os.FileInfo, _ *os.File) (bool, error) {
 		if entryInfo.Mode().IsRegular() {
 			total += entryInfo.Size()
 			if entryInfo.Size() > limits.MaxFileBytes || total > limits.MaxBundleBytes {
-				return fmt.Errorf("catalog exceeds size limit")
+				return false, fmt.Errorf("catalog exceeds size limit")
 			}
 		}
-		if entry.IsDir() && strings.HasSuffix(entry.Name(), ".appiconset") {
-			appIconSets = append(appIconSets, name)
+		if entryInfo.IsDir() && strings.HasSuffix(filepath.Base(rel), ".appiconset") {
+			appIconSets = append(appIconSets, filepath.Join(catalog, rel))
 		}
-		return nil
+		return false, nil
 	})
 	if err != nil {
 		return []Problem{problem("unsafe_catalog", "assetCatalogPath", err.Error())}
@@ -118,6 +100,12 @@ func validateIconCatalog(ctx context.Context, catalog string, limits Limits) []P
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&contents); err != nil {
 		return []Problem{problem("invalid_icon_contents", "Contents.json", err.Error())}
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err == nil {
+		return []Problem{problem("invalid_icon_contents", "Contents.json", "trailing JSON value")}
+	} else if !errors.Is(err, io.EOF) {
+		return []Problem{problem("invalid_icon_contents", "Contents.json", "malformed trailing data: "+err.Error())}
 	}
 	found := map[string]bool{}
 	for _, image := range contents.Images {
@@ -155,6 +143,11 @@ func validateIconCatalog(ctx context.Context, catalog string, limits Limits) []P
 		expected, err := parseDimension(image.Size, image.Scale)
 		if err != nil || cfg.Width != expected || cfg.Height != expected {
 			problems = append(problems, problem("wrong_icon_dimensions", slot, fmt.Sprintf("icon is %dx%d; want %dx%d", cfg.Width, cfg.Height, expected, expected)))
+			continue
+		}
+		decoded, err := png.Decode(bytes.NewReader(data))
+		if err != nil || decoded.Bounds().Dx() != expected || decoded.Bounds().Dy() != expected {
+			problems = append(problems, problem("invalid_icon_png", slot, "icon pixel data cannot be fully decoded"))
 		}
 	}
 	for _, required := range requiredIconSlots {

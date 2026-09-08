@@ -87,16 +87,14 @@ func CreateSigningConfig(ctx context.Context, path string, c SigningConfig) erro
 	if int64(len(b)) > DefaultLimits().MaxConfigBytes {
 		return fmt.Errorf("encoded config exceeds size limit")
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, cleanup, err := createRegularNoFollow(path, 0o600)
 	if err != nil {
 		return err
 	}
 	ok := false
 	defer func() {
 		_ = f.Close()
-		if !ok {
-			_ = os.Remove(path)
-		}
+		cleanup(ok)
 	}()
 	if _, err := f.Write(b); err != nil {
 		return err
@@ -118,20 +116,18 @@ func LoadSigningConfig(ctx context.Context, path string, limits Limits) (Signing
 	if err := requireAbsoluteCleanPath("config path", path); err != nil {
 		return c, err
 	}
-	if err := rejectSymlinkPath(path, true); err != nil {
-		return c, fmt.Errorf("validate config path: %w", err)
-	}
-	info, err := os.Lstat(path)
+	f, info, err := openRegularNoFollow(path)
 	if err != nil {
 		return c, err
 	}
-	if !info.Mode().IsRegular() {
-		return c, fmt.Errorf("config is not a regular file")
-	}
+	defer f.Close()
 	if info.Mode().Perm()&0o077 != 0 {
 		return c, fmt.Errorf("config permissions %04o expose private configuration; require 0600 or stricter", info.Mode().Perm())
 	}
-	b, err := readRegularFile(ctx, path, limits.MaxConfigBytes)
+	if info.Size() > limits.MaxConfigBytes {
+		return c, fmt.Errorf("config is %d bytes; limit is %d", info.Size(), limits.MaxConfigBytes)
+	}
+	b, err := readBounded(ctx, f, limits.MaxConfigBytes)
 	if err != nil {
 		return c, err
 	}

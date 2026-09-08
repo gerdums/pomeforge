@@ -50,6 +50,23 @@ func TestTrustedProfileAndIdentity(t *testing.T) {
 	}
 }
 
+func TestIdentityKeepsApplicationPrefixSeparateFromTeam(t *testing.T) {
+	f := newCryptoFixture(t)
+	dir := t.TempDir()
+	paths := f.writeIdentity(t, dir, f.profile(t, profileOptions{prefix: "LEGACY1234"}), nil, nil, nil)
+	result, err := InspectConfiguredIdentity(context.Background(), paths.config, f.now, Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid() {
+		t.Fatalf("legacy App ID prefix rejected: %+v", result.Problems)
+	}
+	profile := result.Value.Profile
+	if profile.ApplicationIdentifierPrefix != "LEGACY1234" || profile.TeamID != "TEAM123456" || profile.BundleIdentifier != "com.example.Orchard" {
+		t.Fatalf("prefix/team parsing is incorrect: %+v", profile)
+	}
+}
+
 func TestProfileTrustIsSeparateFromSignature(t *testing.T) {
 	f := newCryptoFixture(t)
 	dir := t.TempDir()

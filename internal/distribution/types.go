@@ -125,24 +125,25 @@ const (
 
 // ProfileReport contains public provisioning profile facts.
 type ProfileReport struct {
-	SHA256                string         `json:"sha256"`
-	UUID                  string         `json:"uuid"`
-	Name                  string         `json:"name"`
-	CreationDate          time.Time      `json:"creationDate"`
-	ExpirationDate        time.Time      `json:"expirationDate"`
-	TeamID                string         `json:"teamID"`
-	ApplicationIdentifier string         `json:"applicationIdentifier"`
-	BundleIdentifier      string         `json:"bundleIdentifier"`
-	Type                  ProfileType    `json:"type"`
-	SignatureValid        bool           `json:"signatureValid"`
-	Trust                 TrustStatus    `json:"trust"`
-	TrustError            string         `json:"trustError,omitempty"`
-	HasProvisionedDevices bool           `json:"hasProvisionedDevices"`
-	DeviceCount           int            `json:"deviceCount"`
-	ProvisionsAllDevices  bool           `json:"provisionsAllDevices"`
-	GetTaskAllow          bool           `json:"getTaskAllow"`
-	CertificateSHA256     []string       `json:"certificateSHA256"`
-	Entitlements          map[string]any `json:"entitlements"`
+	SHA256                      string         `json:"sha256"`
+	UUID                        string         `json:"uuid"`
+	Name                        string         `json:"name"`
+	CreationDate                time.Time      `json:"creationDate"`
+	ExpirationDate              time.Time      `json:"expirationDate"`
+	TeamID                      string         `json:"teamID"`
+	ApplicationIdentifierPrefix string         `json:"applicationIdentifierPrefix"`
+	ApplicationIdentifier       string         `json:"applicationIdentifier"`
+	BundleIdentifier            string         `json:"bundleIdentifier"`
+	Type                        ProfileType    `json:"type"`
+	SignatureValid              bool           `json:"signatureValid"`
+	Trust                       TrustStatus    `json:"trust"`
+	TrustError                  string         `json:"trustError,omitempty"`
+	HasProvisionedDevices       bool           `json:"hasProvisionedDevices"`
+	DeviceCount                 int            `json:"deviceCount"`
+	ProvisionsAllDevices        bool           `json:"provisionsAllDevices"`
+	GetTaskAllow                bool           `json:"getTaskAllow"`
+	CertificateSHA256           []string       `json:"certificateSHA256"`
+	Entitlements                map[string]any `json:"entitlements"`
 }
 
 // IdentityReport combines public identity and profile inspection facts.

@@ -87,3 +87,22 @@ func TestConfigBoundedAndContextAware(t *testing.T) {
 		t.Fatal("canceled read accepted")
 	}
 }
+
+func TestConfigRejectsTrailingValuesAndMalformedBytes(t *testing.T) {
+	dir := t.TempDir()
+	encoded := mustJSON(t, validConfigFor(dir))
+	for _, tc := range []struct {
+		name, suffix string
+	}{
+		{"second value", ` {"version":2}`},
+		{"malformed bytes", ` trailing`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(dir, strings.ReplaceAll(tc.name, " ", "-")+".json")
+			writePrivate(t, path, []byte(encoded+tc.suffix))
+			if _, err := LoadSigningConfig(context.Background(), path, Limits{}); err == nil || !strings.Contains(err.Error(), "trailing") {
+				t.Fatalf("trailing config data accepted: %v", err)
+			}
+		})
+	}
+}

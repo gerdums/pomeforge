@@ -23,27 +23,13 @@ func readRegularFile(ctx context.Context, name string, max int64) ([]byte, error
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
-	info, err := os.Lstat(name)
-	if err != nil {
-		return nil, err
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%q is not a regular file", name)
-	}
-	if info.Size() > max {
-		return nil, fmt.Errorf("%q is %d bytes; limit is %d", name, info.Size(), max)
-	}
-	f, err := os.Open(name)
+	f, info, err := openRegularNoFollow(name)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	openedInfo, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
-		return nil, fmt.Errorf("%q changed during safe open", name)
+	if info.Size() > max {
+		return nil, fmt.Errorf("%q is %d bytes; limit is %d", name, info.Size(), max)
 	}
 	b, err := readBounded(ctx, f, max)
 	if err != nil {
@@ -51,6 +37,8 @@ func readRegularFile(ctx context.Context, name string, max int64) ([]byte, error
 	}
 	return b, nil
 }
+
+type treeVisitor func(relative string, info os.FileInfo, file *os.File) (skipDirectory bool, err error)
 
 func readBounded(ctx context.Context, r io.Reader, max int64) ([]byte, error) {
 	if max < 0 {

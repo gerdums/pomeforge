@@ -2,11 +2,13 @@ package distribution
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"image/png"
 	"io"
 	"os"
 	"path"
@@ -36,6 +38,7 @@ type BundleReport struct {
 	DeviceFamilies   []int               `json:"deviceFamilies"`
 	MinimumOSVersion string              `json:"minimumOSVersion"`
 	SDKMetadata      map[string]string   `json:"sdkMetadata"`
+	PrimaryIconName  string              `json:"primaryIconName"`
 	IconFiles        []string            `json:"iconFiles"`
 	MachO            MachOReport         `json:"machO"`
 	CodeSignature    CodeSignatureReport `json:"codeSignature"`
@@ -145,45 +148,113 @@ func collectIconNames(info map[string]any) []string {
 	return out
 }
 
-func iconNameMatches(metadataName, fileName string) bool {
-	base := strings.TrimSuffix(metadataName, ".png")
-	return strings.HasSuffix(fileName, ".png") && (strings.TrimSuffix(fileName, ".png") == base || strings.HasPrefix(strings.TrimSuffix(fileName, ".png"), base+"@") || strings.HasPrefix(strings.TrimSuffix(fileName, ".png"), base+"~"))
+type compiledIconRequirement struct {
+	filename  string
+	baseName  string
+	dimension int
+	metadata  bool
 }
 
-func validateArchivedIconFiles(entries map[string]*zip.File, appRoot string, names []string) []Problem {
-	var problems []Problem
-	for _, icon := range names {
-		found := false
-		for entry := range entries {
-			rel := strings.TrimPrefix(entry, appRoot+"/")
-			if rel != entry && !strings.Contains(rel, "/") && iconNameMatches(icon, rel) {
-				found = true
-				break
-			}
+func compiledIconRequirements(primary string) []compiledIconRequirement {
+	seen := map[string]bool{}
+	var requirements []compiledIconRequirement
+	for _, slot := range requiredIconSlots {
+		base := primary + slot.size
+		name := base
+		if slot.scale != "1x" {
+			name += "@" + slot.scale
 		}
-		if !found {
-			problems = append(problems, problem("missing_icon_file", "CFBundleIconFiles", fmt.Sprintf("compiled icon metadata %q has no matching top-level PNG", icon)))
+		name += ".png"
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		dimension, _ := parseDimension(slot.size, slot.scale)
+		requirements = append(requirements, compiledIconRequirement{
+			filename: name, baseName: base, dimension: dimension,
+			metadata: slot.idiom == "iphone" || slot.idiom == "ipad",
+		})
+	}
+	return requirements
+}
+
+func validateCompiledPNG(data []byte, requirement compiledIconRequirement) error {
+	config, err := png.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("not a valid PNG: %w", err)
+	}
+	if config.Width != requirement.dimension || config.Height != requirement.dimension {
+		return fmt.Errorf("PNG is %dx%d; want %dx%d", config.Width, config.Height, requirement.dimension, requirement.dimension)
+	}
+	decoded, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("PNG pixel data cannot be decoded: %w", err)
+	}
+	if decoded.Bounds().Dx() != requirement.dimension || decoded.Bounds().Dy() != requirement.dimension {
+		return fmt.Errorf("decoded PNG dimensions changed unexpectedly")
+	}
+	return nil
+}
+
+func validateIconMetadata(primary string, names []string) []Problem {
+	if primary == "" || filepath.Base(primary) != primary || strings.ContainsAny(primary, "/\\\x00") {
+		return []Problem{problem("invalid_primary_icon_name", "CFBundleIconName", "CFBundleIconName must be a nonempty simple filename stem")}
+	}
+	var problems []Problem
+	declared := map[string]bool{}
+	for _, name := range names {
+		if name == "" || filepath.Base(name) != name || strings.ContainsAny(name, "/\\\x00") {
+			problems = append(problems, problem("unsafe_icon_metadata", "CFBundleIconFiles", fmt.Sprintf("icon metadata %q is not a simple filename stem", name)))
+			continue
+		}
+		declared[strings.TrimSuffix(name, ".png")] = true
+	}
+	for _, requirement := range compiledIconRequirements(primary) {
+		if requirement.metadata && !declared[requirement.baseName] {
+			problems = append(problems, problem("incomplete_icon_metadata", "CFBundleIconFiles", fmt.Sprintf("compiled icon metadata does not declare %q", requirement.baseName)))
 		}
 	}
 	return problems
 }
 
-func validateDirectoryIconFiles(root string, names []string) []Problem {
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return []Problem{problem("read_bundle_icons", "CFBundleIconFiles", err.Error())}
-	}
+func validateArchivedIconFiles(ctx context.Context, entries map[string]*zip.File, appRoot, primary string, names []string, max int64) []Problem {
 	var problems []Problem
-	for _, icon := range names {
-		found := false
-		for _, entry := range entries {
-			if !entry.IsDir() && iconNameMatches(icon, entry.Name()) {
-				found = true
-				break
-			}
+	problems = append(problems, validateIconMetadata(primary, names)...)
+	if primary == "" {
+		return problems
+	}
+	for _, requirement := range compiledIconRequirements(primary) {
+		entry := entries[appRoot+"/"+requirement.filename]
+		if entry == nil {
+			problems = append(problems, problem("missing_icon_file", requirement.filename, "required compiled iPhone/iPad/marketing PNG is absent"))
+			continue
 		}
-		if !found {
-			problems = append(problems, problem("missing_icon_file", "CFBundleIconFiles", fmt.Sprintf("compiled icon metadata %q has no matching top-level PNG", icon)))
+		data, err := readZipEntry(ctx, entry, max)
+		if err != nil {
+			problems = append(problems, problem("invalid_icon_png", requirement.filename, err.Error()))
+			continue
+		}
+		if err := validateCompiledPNG(data, requirement); err != nil {
+			problems = append(problems, problem("invalid_icon_png", requirement.filename, err.Error()))
+		}
+	}
+	return problems
+}
+
+func validateDirectoryIconFiles(ctx context.Context, root, primary string, names []string, max int64) []Problem {
+	var problems []Problem
+	problems = append(problems, validateIconMetadata(primary, names)...)
+	if primary == "" {
+		return problems
+	}
+	for _, requirement := range compiledIconRequirements(primary) {
+		data, err := readRegularFile(ctx, filepath.Join(root, requirement.filename), max)
+		if err != nil {
+			problems = append(problems, problem("missing_icon_file", requirement.filename, "required compiled iPhone/iPad/marketing PNG is absent or unsafe: "+err.Error()))
+			continue
+		}
+		if err := validateCompiledPNG(data, requirement); err != nil {
+			problems = append(problems, problem("invalid_icon_png", requirement.filename, err.Error()))
 		}
 	}
 	return problems
@@ -202,6 +273,7 @@ func reportFromInfo(info map[string]any) BundleReport {
 		Executable:       plistString(info, "CFBundleExecutable"),
 		MinimumOSVersion: plistString(info, "MinimumOSVersion"),
 		DeviceFamilies:   plistInts(info["UIDeviceFamily"]),
+		PrimaryIconName:  plistString(info, "CFBundleIconName"),
 		IconFiles:        collectIconNames(info), SDKMetadata: map[string]string{},
 	}
 	for _, key := range sdkInfoKeys {
@@ -212,7 +284,7 @@ func reportFromInfo(info map[string]any) BundleReport {
 	return r
 }
 
-func validateBundleReport(r BundleReport) []Problem {
+func validateBundleReport(r BundleReport, requireIcons bool) []Problem {
 	var ps []Problem
 	required := []struct{ value, field, code string }{
 		{r.BundleIdentifier, "CFBundleIdentifier", "missing_bundle_identifier"},
@@ -260,7 +332,7 @@ func validateBundleReport(r BundleReport) []Problem {
 	if r.MachO.Platform == "" {
 		ps = append(ps, problem("missing_macho_platform", "CFBundleExecutable", "main executable lacks supported arm64 iOS platform metadata"))
 	}
-	if len(r.IconFiles) == 0 {
+	if requireIcons && (len(r.IconFiles) == 0 || r.PrimaryIconName == "") {
 		ps = append(ps, problem("missing_icon_metadata", "CFBundleIcons", "Info.plist contains no compiled icon file metadata"))
 	}
 	return ps
@@ -336,6 +408,10 @@ func hashRegularFile(ctx context.Context, file *os.File, max int64) (string, int
 // InspectIPA performs bounded archive, plist, Mach-O, profile, and metadata
 // inspection without extracting entries to disk.
 func InspectIPA(ctx context.Context, ipaPath string, options InspectionOptions) (Result[IPAReport], error) {
+	return inspectIPA(ctx, ipaPath, options, true)
+}
+
+func inspectIPA(ctx context.Context, ipaPath string, options InspectionOptions, validatePermissions bool) (Result[IPAReport], error) {
 	limits := options.Limits.withDefaults()
 	var out Result[IPAReport]
 	if options.CurrentTime.IsZero() {
@@ -344,30 +420,13 @@ func InspectIPA(ctx context.Context, ipaPath string, options InspectionOptions) 
 	if err := requireAbsoluteCleanPath("ipaPath", ipaPath); err != nil {
 		return out, err
 	}
-	if err := rejectSymlinkPath(ipaPath, true); err != nil {
-		return out, err
-	}
-	info, err := os.Lstat(ipaPath)
-	if err != nil {
-		return out, err
-	}
-	if !info.Mode().IsRegular() {
-		return out, errors.New("IPA input is not a regular file")
-	}
-	if info.Size() > limits.MaxIPABytes {
-		return out, fmt.Errorf("IPA is %d bytes; limit is %d", info.Size(), limits.MaxIPABytes)
-	}
-	f, err := os.Open(ipaPath)
+	f, info, err := openRegularNoFollow(ipaPath)
 	if err != nil {
 		return out, err
 	}
 	defer f.Close()
-	openedInfo, err := f.Stat()
-	if err != nil {
-		return out, err
-	}
-	if !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
-		return out, errors.New("IPA changed during safe open")
+	if info.Size() > limits.MaxIPABytes {
+		return out, fmt.Errorf("IPA is %d bytes; limit is %d", info.Size(), limits.MaxIPABytes)
 	}
 	out.Value.SHA256, out.Value.Size, err = hashRegularFile(ctx, f, limits.MaxIPABytes)
 	if err != nil {
@@ -426,10 +485,30 @@ func InspectIPA(ctx context.Context, ipaPath string, options InspectionOptions) 
 	for appRoot = range apps {
 	}
 	out.Value.Bundle.AppDirectory = appRoot
-	for name := range entries {
+	for name, entry := range entries {
+		trimmed := strings.TrimSuffix(name, "/")
+		if trimmed != "Payload" && trimmed != appRoot && !strings.HasPrefix(trimmed, appRoot+"/") {
+			out.Problems = append(out.Problems, problem("unsupported_archive_entry", name, "IPA entries are supported only under the single Payload/*.app bundle"))
+			continue
+		}
 		if strings.HasPrefix(name, appRoot+"/PlugIns/") || strings.HasPrefix(name, appRoot+"/Extensions/") || strings.Contains(name, ".appex/") {
 			out.Problems = append(out.Problems, problem("unsupported_nested_extension", name, "app extensions require separately matched profiles and are unsupported"))
-			break
+		}
+		if strings.HasPrefix(name, appRoot+"/Frameworks/") || strings.Contains(name, ".framework/") {
+			out.Problems = append(out.Problems, problem("unsupported_nested_framework", name, "frameworks require separately validated nested code signing and are unsupported"))
+		}
+		if strings.HasPrefix(name, appRoot+"/Watch/") {
+			out.Problems = append(out.Problems, problem("unsupported_watch_content", name, "Watch content requires a separately validated signing topology and is unsupported"))
+		}
+		if validatePermissions {
+			mode := entry.Mode()
+			if strings.HasSuffix(name, "/") {
+				if !mode.IsDir() || mode.Perm()&0o555 != 0o555 {
+					out.Problems = append(out.Problems, problem("unsafe_archive_directory_mode", name, fmt.Sprintf("archive directory mode %04o is not traversable/readable", mode.Perm())))
+				}
+			} else if mode.Perm()&0o400 == 0 {
+				out.Problems = append(out.Problems, problem("unsafe_archive_file_mode", name, fmt.Sprintf("archive file mode %04o is not owner-readable", mode.Perm())))
+			}
 		}
 	}
 	infoEntry := entries[appRoot+"/Info.plist"]
@@ -454,6 +533,9 @@ func InspectIPA(ctx context.Context, ipaPath string, options InspectionOptions) 
 		if execEntry == nil {
 			out.Problems = append(out.Problems, problem("missing_main_executable", "CFBundleExecutable", "declared main executable is absent"))
 		} else {
+			if validatePermissions && execEntry.Mode().Perm()&0o111 == 0 {
+				out.Problems = append(out.Problems, problem("unsafe_archive_executable_mode", execEntry.Name, fmt.Sprintf("main executable mode %04o is not executable", execEntry.Mode().Perm())))
+			}
 			execData, readErr := readZipEntry(ctx, execEntry, limits.MaxFileBytes)
 			if readErr != nil {
 				return out, readErr
@@ -477,13 +559,13 @@ func InspectIPA(ctx context.Context, ipaPath string, options InspectionOptions) 
 	} else {
 		out.Problems = append(out.Problems, problem("missing_embedded_profile", appRoot, "signed IPA has no embedded.mobileprovision"))
 	}
-	out.Problems = append(out.Problems, validateBundleReport(out.Value.Bundle)...)
-	out.Problems = append(out.Problems, validateArchivedIconFiles(entries, appRoot, out.Value.Bundle.IconFiles)...)
+	out.Problems = append(out.Problems, validateBundleReport(out.Value.Bundle, true)...)
+	out.Problems = append(out.Problems, validateArchivedIconFiles(ctx, entries, appRoot, out.Value.Bundle.PrimaryIconName, out.Value.Bundle.IconFiles, limits.MaxFileBytes)...)
 	out.Value.StructureValid = out.Valid()
 	return out, nil
 }
 
-func inspectBundleDirectory(ctx context.Context, root string, limits Limits) (Result[BundleReport], error) {
+func inspectBundleDirectory(ctx context.Context, root string, limits Limits, requireIcons bool) (Result[BundleReport], error) {
 	var out Result[BundleReport]
 	infoData, err := readRegularFile(ctx, filepath.Join(root, "Info.plist"), limits.MaxFileBytes)
 	if err != nil {
@@ -495,8 +577,9 @@ func inspectBundleDirectory(ctx context.Context, root string, limits Limits) (Re
 	}
 	out.Value = reportFromInfo(info)
 	out.Value.AppDirectory = filepath.Base(root)
-	if signatureInfo, err := os.Lstat(filepath.Join(root, "_CodeSignature", "CodeResources")); err == nil && signatureInfo.Mode().IsRegular() {
+	if signature, _, err := openRegularNoFollow(filepath.Join(root, "_CodeSignature", "CodeResources")); err == nil {
 		out.Value.CodeSignature.CodeResourcesPresent = true
+		_ = signature.Close()
 	}
 	out.Value.CodeSignature.Verification = "not_performed"
 	if out.Value.Executable != "" {
@@ -510,9 +593,36 @@ func inspectBundleDirectory(ctx context.Context, root string, limits Limits) (Re
 			}
 		}
 	}
-	out.Problems = append(out.Problems, validateBundleReport(out.Value)...)
-	out.Problems = append(out.Problems, validateDirectoryIconFiles(root, out.Value.IconFiles)...)
+	out.Problems = append(out.Problems, validateBundleReport(out.Value, requireIcons)...)
+	if requireIcons {
+		out.Problems = append(out.Problems, validateDirectoryIconFiles(ctx, root, out.Value.PrimaryIconName, out.Value.IconFiles, limits.MaxFileBytes)...)
+	}
 	return out, nil
+}
+
+func scanBundleTree(ctx context.Context, root string, limits Limits, skipReplacedSigning bool) ([]Problem, error) {
+	var problems []Problem
+	var total int64
+	var skip func(string) bool
+	if skipReplacedSigning {
+		skip = replacedMainSigningPath
+	}
+	err := walkRegularTreeSkipping(ctx, root, limits.MaxArchiveEntries, skip, func(rel string, info os.FileInfo, _ *os.File) (bool, error) {
+		if info.Mode().IsRegular() {
+			if info.Size() > limits.MaxFileBytes {
+				return false, fmt.Errorf("bundle file %q exceeds per-file limit", rel)
+			}
+			total += info.Size()
+			if total > limits.MaxBundleBytes {
+				return false, fmt.Errorf("bundle exceeds %d-byte limit", limits.MaxBundleBytes)
+			}
+		}
+		if err := topologyProblem(rel); err != nil {
+			problems = append(problems, problem("unsupported_signing_topology", rel, err.Error()))
+		}
+		return false, nil
+	})
+	return problems, err
 }
 
 // InspectBundle performs bounded, non-mutating inspection of a real .app
@@ -527,76 +637,33 @@ func InspectBundle(ctx context.Context, bundlePath string, options InspectionOpt
 	if err := requireAbsoluteCleanPath("bundlePath", bundlePath); err != nil {
 		return out, err
 	}
-	if err := rejectSymlinkPath(bundlePath, true); err != nil {
-		return out, err
-	}
-	root, err := os.Lstat(bundlePath)
+	root, err := openDirectoryNoFollow(bundlePath)
 	if err != nil {
 		return out, err
 	}
-	if !root.IsDir() || !strings.HasSuffix(bundlePath, ".app") {
+	_ = root.Close()
+	if !strings.HasSuffix(bundlePath, ".app") {
 		return out, errors.New("bundle input must be a real .app directory")
 	}
-	entries := 0
-	var total int64
-	err = filepath.WalkDir(bundlePath, func(name string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-		if name == bundlePath {
-			return nil
-		}
-		entries++
-		if entries > limits.MaxArchiveEntries {
-			return fmt.Errorf("bundle exceeds %d-entry limit", limits.MaxArchiveEntries)
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if info.Mode()&os.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular()) {
-			return fmt.Errorf("bundle contains nonregular entry %q", name)
-		}
-		if info.Mode().IsRegular() {
-			if info.Size() > limits.MaxFileBytes {
-				return fmt.Errorf("bundle file exceeds per-file limit")
-			}
-			total += info.Size()
-			if total > limits.MaxBundleBytes {
-				return fmt.Errorf("bundle exceeds size limit")
-			}
-		}
-		rel, _ := filepath.Rel(bundlePath, name)
-		slash := filepath.ToSlash(rel)
-		if strings.HasPrefix(slash, "PlugIns/") || strings.HasPrefix(slash, "Extensions/") || strings.HasPrefix(slash, "Frameworks/") || strings.HasPrefix(slash, "Watch/") || strings.Contains(slash, ".appex/") || strings.Contains(slash, ".framework/") {
-			out.Problems = append(out.Problems, problem("unsupported_signing_topology", rel, "extensions/frameworks require separate signing identities and profiles"))
-		}
-		return nil
-	})
+	treeProblems, err := scanBundleTree(ctx, bundlePath, limits, false)
 	if err != nil {
 		return out, err
 	}
-	parsed, err := inspectBundleDirectory(ctx, bundlePath, limits)
+	out.Problems = append(out.Problems, treeProblems...)
+	parsed, err := inspectBundleDirectory(ctx, bundlePath, limits, true)
 	if err != nil {
 		return out, err
 	}
 	out.Value = parsed.Value
 	out.Problems = append(out.Problems, parsed.Problems...)
 	profilePath := filepath.Join(bundlePath, "embedded.mobileprovision")
-	if _, err := os.Lstat(profilePath); err == nil {
-		data, err := readRegularFile(ctx, profilePath, limits.MaxProfileBytes)
-		if err != nil {
-			return out, err
-		}
+	if data, err := readRegularFile(ctx, profilePath, limits.MaxProfileBytes); err == nil {
 		report, _, profileErr := inspectProfileData(ctx, data, options.TrustedRootPaths, options.CurrentTime, limits)
 		out.Value.EmbeddedProfile = &report
 		if profileErr != nil {
 			out.Problems = append(out.Problems, problem("invalid_embedded_profile", "embedded.mobileprovision", profileErr.Error()))
 		}
-	} else if !os.IsNotExist(err) {
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return out, err
 	}
 	return out, nil

@@ -102,18 +102,30 @@ func ValidateEntitlements(profile, requested map[string]any) []Problem {
 	return problems
 }
 
-func exactSigningEntitlements(profile map[string]any, requested map[string]any, teamID, bundleID string) (map[string]any, []Problem) {
+func exactSigningEntitlements(profile map[string]any, requested map[string]any, appIDPrefix, teamID, bundleID string) (map[string]any, []Problem) {
+	expected := map[string]any{
+		"application-identifier":              appIDPrefix + "." + bundleID,
+		"com.apple.developer.team-identifier": teamID,
+		"get-task-allow":                      false,
+	}
+	var problems []Problem
+	for _, key := range []string{"application-identifier", "com.apple.developer.team-identifier", "get-task-allow"} {
+		if value, present := requested[key]; present && !equalPlistValue(value, expected[key]) {
+			problems = append(problems, problem("required_entitlement_conflict", "entitlements."+key, fmt.Sprintf("requested %q conflicts with the required signing value", key)))
+		}
+	}
 	exact := cloneMap(requested)
-	exact["application-identifier"] = teamID + "." + bundleID
-	exact["com.apple.developer.team-identifier"] = teamID
-	exact["get-task-allow"] = false
+	for key, value := range expected {
+		exact[key] = value
+	}
 	if grant, ok := profile["keychain-access-groups"]; ok {
 		if _, requestedExplicitly := requested["keychain-access-groups"]; !requestedExplicitly {
-			candidate := []any{teamID + "." + bundleID}
+			candidate := []any{appIDPrefix + "." + bundleID}
 			if entitlementValueAllowed(grant, candidate) {
 				exact["keychain-access-groups"] = candidate
 			}
 		}
 	}
-	return exact, ValidateEntitlements(profile, exact)
+	problems = append(problems, ValidateEntitlements(profile, exact)...)
+	return exact, problems
 }

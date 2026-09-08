@@ -74,16 +74,16 @@ func mustRSA(t *testing.T) *rsa.PrivateKey {
 }
 
 type profileOptions struct {
-	uuid, bundle, team       string
-	creation, expiry         time.Time
-	devicesPresent           bool
-	devices                  []string
-	enterprise, getTaskAllow bool
-	binary                   bool
-	developerCert            *x509.Certificate
-	signer, parent           *x509.Certificate
-	signerKey                *rsa.PrivateKey
-	extraEntitlements        map[string]any
+	uuid, bundle, team, prefix string
+	creation, expiry           time.Time
+	devicesPresent             bool
+	devices                    []string
+	enterprise, getTaskAllow   bool
+	binary                     bool
+	developerCert              *x509.Certificate
+	signer, parent             *x509.Certificate
+	signerKey                  *rsa.PrivateKey
+	extraEntitlements          map[string]any
 }
 
 func (f *cryptoFixture) profile(t *testing.T, options profileOptions) []byte {
@@ -96,6 +96,9 @@ func (f *cryptoFixture) profile(t *testing.T, options profileOptions) []byte {
 	}
 	if options.uuid == "" {
 		options.uuid = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
+	}
+	if options.prefix == "" {
+		options.prefix = options.team
 	}
 	if options.creation.IsZero() {
 		options.creation = f.now.Add(-time.Hour)
@@ -116,10 +119,10 @@ func (f *cryptoFixture) profile(t *testing.T, options profileOptions) []byte {
 		options.signerKey = f.profileKey
 	}
 	entitlements := map[string]any{
-		"application-identifier":              options.team + "." + options.bundle,
+		"application-identifier":              options.prefix + "." + options.bundle,
 		"com.apple.developer.team-identifier": options.team,
 		"get-task-allow":                      options.getTaskAllow,
-		"keychain-access-groups":              []string{options.team + ".*"},
+		"keychain-access-groups":              []string{options.prefix + ".*"},
 	}
 	for k, v := range options.extraEntitlements {
 		entitlements[k] = v
@@ -127,7 +130,7 @@ func (f *cryptoFixture) profile(t *testing.T, options profileOptions) []byte {
 	profile := map[string]any{
 		"UUID": options.uuid, "Name": "Fixture App Store",
 		"CreationDate": options.creation, "ExpirationDate": options.expiry,
-		"TeamIdentifier": []string{options.team}, "ApplicationIdentifierPrefix": []string{options.team},
+		"TeamIdentifier": []string{options.team}, "ApplicationIdentifierPrefix": []string{options.prefix},
 		"DeveloperCertificates": [][]byte{options.developerCert.Raw}, "Entitlements": entitlements,
 	}
 	if options.devicesPresent {
@@ -202,8 +205,9 @@ func fixtureInfo(t *testing.T, binaryFormat bool) []byte {
 	t.Helper()
 	info := map[string]any{
 		"CFBundleIdentifier": "com.example.Orchard", "CFBundleShortVersionString": "1.2.3", "CFBundleVersion": "42", "CFBundleExecutable": "Orchard", "MinimumOSVersion": "17.0",
-		"UIDeviceFamily": []int{1, 2}, "CFBundleIcons": map[string]any{"CFBundlePrimaryIcon": map[string]any{"CFBundleIconFiles": []string{"AppIcon60x60"}}},
-		"CFBundleIcons~ipad": map[string]any{"CFBundlePrimaryIcon": map[string]any{"CFBundleIconFiles": []string{"AppIcon76x76"}}},
+		"UIDeviceFamily": []int{1, 2}, "CFBundleIconName": "AppIcon",
+		"CFBundleIcons":      map[string]any{"CFBundlePrimaryIcon": map[string]any{"CFBundleIconName": "AppIcon", "CFBundleIconFiles": []string{"AppIcon20x20", "AppIcon29x29", "AppIcon40x40", "AppIcon60x60"}}},
+		"CFBundleIcons~ipad": map[string]any{"CFBundlePrimaryIcon": map[string]any{"CFBundleIconName": "AppIcon", "CFBundleIconFiles": []string{"AppIcon20x20", "AppIcon29x29", "AppIcon40x40", "AppIcon76x76", "AppIcon83.5x83.5"}}},
 		"DTPlatformName":     "iphoneos", "DTPlatformVersion": "26.0", "DTPlatformBuild": "23A1", "DTSDKName": "iphoneos26.0", "DTSDKBuild": "23A1", "DTXcode": "2600", "DTXcodeBuild": "17A1",
 	}
 	format := plist.XMLFormat
@@ -227,8 +231,7 @@ func writeBundle(t *testing.T, dir string, binaryInfo bool) string {
 	if err := os.WriteFile(filepath.Join(app, "Orchard"), fixtureMachO(), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	writePrivate(t, filepath.Join(app, "AppIcon60x60.png"), []byte("fixture-png"))
-	writePrivate(t, filepath.Join(app, "AppIcon76x76.png"), []byte("fixture-png"))
+	writeCompiledIcons(t, app, "AppIcon")
 	return app
 }
 
@@ -268,16 +271,40 @@ func writeIPA(t *testing.T, file string, entries []zipEntry) {
 
 func validIPAEntries(t *testing.T, profile []byte, binaryInfo bool) []zipEntry {
 	t.Helper()
-	return []zipEntry{
+	entries := []zipEntry{
 		{"Payload/Orchard.app/Info.plist", fixtureInfo(t, binaryInfo), 0o600},
 		{"Payload/Orchard.app/Orchard", fixtureMachO(), 0o700},
 		{"Payload/Orchard.app/embedded.mobileprovision", profile, 0o600},
-		{"Payload/Orchard.app/AppIcon60x60.png", []byte("fixture-png"), 0o600},
-		{"Payload/Orchard.app/AppIcon76x76.png", []byte("fixture-png"), 0o600},
+	}
+	for _, requirement := range compiledIconRequirements("AppIcon") {
+		entries = append(entries, zipEntry{"Payload/Orchard.app/" + requirement.filename, fixturePNG(t, requirement.dimension), 0o600})
+	}
+	return entries
+}
+
+func fixturePNG(t *testing.T, dimension int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, dimension, dimension))
+	for y := 0; y < dimension; y++ {
+		for x := 0; x < dimension; x++ {
+			img.Set(x, y, color.RGBA{R: 20, G: 100, B: 180, A: 255})
+		}
+	}
+	var data bytes.Buffer
+	if err := png.Encode(&data, img); err != nil {
+		t.Fatal(err)
+	}
+	return data.Bytes()
+}
+
+func writeCompiledIcons(t *testing.T, app, primary string) {
+	t.Helper()
+	for _, requirement := range compiledIconRequirements(primary) {
+		writePrivate(t, filepath.Join(app, requirement.filename), fixturePNG(t, requirement.dimension))
 	}
 }
 
-func zipBundle(t *testing.T, app, output, profile string) {
+func zipBundle(t *testing.T, app, output, profile string, extra ...zipEntry) {
 	t.Helper()
 	var entries []zipEntry
 	err := filepath.Walk(app, func(name string, info os.FileInfo, err error) error {
@@ -295,7 +322,9 @@ func zipBundle(t *testing.T, app, output, profile string) {
 		if err != nil {
 			return err
 		}
-		entries = append(entries, zipEntry{name: filepath.ToSlash(filepath.Join("Payload", rel)), data: data, mode: info.Mode()})
+		// Exact zsign 1.1.2 emits DOS-style attributes that Go reports as 0666,
+		// including for the executable. Export must canonicalize these modes.
+		entries = append(entries, zipEntry{name: filepath.ToSlash(filepath.Join("Payload", rel)), data: data, mode: 0o666})
 		return nil
 	})
 	if err != nil {
@@ -307,6 +336,7 @@ func zipBundle(t *testing.T, app, output, profile string) {
 	}
 	entries = append(entries, zipEntry{name: "Payload/Orchard.app/embedded.mobileprovision", data: profileData, mode: 0o600})
 	entries = append(entries, zipEntry{name: "Payload/Orchard.app/_CodeSignature/CodeResources", data: []byte("synthetic-not-a-real-signature"), mode: 0o600})
+	entries = append(entries, extra...)
 	writeIPA(t, output, entries)
 }
 

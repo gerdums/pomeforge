@@ -199,12 +199,12 @@ func inspectProfileData(ctx context.Context, data []byte, rootPaths []string, at
 	if len(raw.TeamIdentifier) > 0 {
 		report.TeamID = raw.TeamIdentifier[0]
 	}
-	if team, ok := stringValue(raw.Entitlements["com.apple.developer.team-identifier"]); ok && report.TeamID == "" {
-		report.TeamID = team
+	if len(raw.ApplicationIdentifierPrefix) > 0 {
+		report.ApplicationIdentifierPrefix = raw.ApplicationIdentifierPrefix[0]
 	}
 	report.ApplicationIdentifier, _ = stringValue(raw.Entitlements["application-identifier"])
-	if report.ApplicationIdentifier != "" && report.TeamID != "" && strings.HasPrefix(report.ApplicationIdentifier, report.TeamID+".") {
-		report.BundleIdentifier = strings.TrimPrefix(report.ApplicationIdentifier, report.TeamID+".")
+	if report.ApplicationIdentifier != "" && report.ApplicationIdentifierPrefix != "" && strings.HasPrefix(report.ApplicationIdentifier, report.ApplicationIdentifierPrefix+".") {
+		report.BundleIdentifier = strings.TrimPrefix(report.ApplicationIdentifier, report.ApplicationIdentifierPrefix+".")
 	}
 	switch {
 	case report.ProvisionsAllDevices:
@@ -240,6 +240,9 @@ func profileValidationProblems(report ProfileReport, at time.Time) []Problem {
 	}
 	if report.TeamID == "" {
 		problems = append(problems, problem("missing_team_identifier", "TeamIdentifier", "profile team identifier is missing"))
+	}
+	if report.ApplicationIdentifierPrefix == "" {
+		problems = append(problems, problem("missing_application_identifier_prefix", "ApplicationIdentifierPrefix", "profile application identifier prefix is missing"))
 	}
 	if report.ApplicationIdentifier == "" {
 		problems = append(problems, problem("missing_application_identifier", "application-identifier", "profile application identifier is missing"))
@@ -331,8 +334,8 @@ func InspectIdentity(ctx context.Context, c SigningConfig, at time.Time, limits 
 	if entitlementTeam == "" || entitlementTeam != pr.TeamID {
 		out.Problems = append(out.Problems, problem("profile_team_mismatch", "com.apple.developer.team-identifier", "profile team entitlement does not match TeamIdentifier"))
 	}
-	if pr.ApplicationIdentifier == "" || !strings.HasPrefix(pr.ApplicationIdentifier, pr.TeamID+".") {
-		out.Problems = append(out.Problems, problem("profile_application_identifier_mismatch", "application-identifier", "application identifier does not use the profile TeamIdentifier prefix"))
+	if pr.ApplicationIdentifier == "" || !strings.HasPrefix(pr.ApplicationIdentifier, pr.ApplicationIdentifierPrefix+".") {
+		out.Problems = append(out.Problems, problem("profile_application_identifier_mismatch", "application-identifier", "application identifier does not use the profile ApplicationIdentifierPrefix"))
 	}
 	for _, team := range raw.TeamIdentifier {
 		if team != pr.TeamID {
@@ -341,8 +344,8 @@ func InspectIdentity(ctx context.Context, c SigningConfig, at time.Time, limits 
 		}
 	}
 	for _, prefix := range raw.ApplicationIdentifierPrefix {
-		if prefix != pr.TeamID {
-			out.Problems = append(out.Problems, problem("profile_team_mismatch", "ApplicationIdentifierPrefix", "application identifier prefix does not match TeamIdentifier"))
+		if prefix != pr.ApplicationIdentifierPrefix {
+			out.Problems = append(out.Problems, problem("profile_application_prefix_mismatch", "ApplicationIdentifierPrefix", "profile contains inconsistent application identifier prefixes"))
 			break
 		}
 	}
