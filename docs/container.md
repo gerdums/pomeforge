@@ -8,9 +8,11 @@ published-image fallback.
 
 The image is built from pinned multi-architecture Go 1.24.13 and Swift 6.3.3
 image indexes. It contains Swift, `/usr/local/bin/orchard`, and
-`/usr/local/bin/orchard-assets`. It does not contain an Apple SDK, xtool, ASC,
-zsign, credentials, signing material, provisioning profiles, pairing records,
-or developer state.
+`/usr/local/bin/orchard-assets`. It also contains the standalone Linux
+`/usr/local/bin/unxip` 3.3 executable, built without source changes at upstream
+revision `6c3990517fcc4c1db6952fccf4c562fb14097601`. It does not contain an Apple
+SDK, Xcode XIP, xtool, ASC, zsign, credentials, signing material, provisioning
+profiles, pairing records, or developer state.
 
 ## Build from a clean checkout
 
@@ -30,14 +32,19 @@ docker build --file packaging/Containerfile --tag orchard:local .
 
 The build context uses a positive allowlist for the Go module, embedded web
 assets, AssetKit bridge, entrypoint, and the small root catalog package expected
-by the final integration. Final deny rules exclude repository metadata, local
-Orchard state, caches, Apple/Xcode/SDK material, credentials, profiles, pairing
-records, and conventional app/workspace directories. `.dockerignore` and
-`.containerignore` are intentionally identical.
+by the final integration. It narrowly admits the root third-party notice and
+third-party license directory as runtime notice inputs. Final recursive deny
+rules exclude repository metadata, local Orchard and ASC state, caches,
+Apple/Xcode/SDK and archive material, credentials, profiles, pairing records,
+and conventional app/workspace directories even when those appear below an
+otherwise allowlisted source directory. `.dockerignore` and `.containerignore`
+are intentionally identical.
 
 An engine-backed probe constructs a temporary context containing only harmless
-sentinel files outside the source allowlist and verifies they are absent after
-`COPY .`:
+sentinel files at the root and below an otherwise allowlisted `internal/`
+directory. It verifies that expected source and notice inputs are present after
+`COPY .` while private state, credentials, SDKs, archives, and application trees
+are absent:
 
 ```sh
 ./packaging/container-context-probe.sh podman
@@ -129,6 +136,10 @@ Until that command exists in the integrated CLI, follow the HTTPS guidance from
 `doctor` and do not treat the example as an implemented command. The image does
 not preinstall xtool, ASC, or zsign.
 
+The `unxip` executable is a separate upstream program, not code linked into
+Orchard. Its `--version` and `--help` contracts and dynamic libraries are checked
+inside the final Swift runtime during the image build.
+
 ## Graphical workspace
 
 Use Linux host networking so Orchard's authenticated HTTP service remains on
@@ -171,6 +182,64 @@ operation. Keep the selected input directory mode 0700. Never copy an Xcode XIP,
 SDK, private key, certificate, profile, or pairing record into the source tree
 or image. Swift remains installed in the runtime for Linux-native iOS
 cross-compilation after the operator explicitly configures a permitted SDK.
+
+For a permitted, separately authenticated Xcode download, the included unxip
+can extract the complete XIP into a fresh directory in private state while
+preserving the archive's original Xcode metadata:
+
+```sh
+podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
+  --volume "$state_dir:/var/lib/orchard:Z" \
+  --volume "$input_dir:/input:ro,Z" \
+  localhost/orchard:local \
+  unxip --statistics /input/Xcode.xip /var/lib/orchard/xcode-import
+```
+
+`/var/lib/orchard/xcode-import` must not exist before this command. Use the
+equivalent Docker identity and volume syntax described above when using Docker.
+unxip does not authenticate the XIP; validate the operator-supplied download by
+an appropriate independent mechanism before extraction. Extraction alone does
+not configure an SDK or prove a native iOS build.
+
+## unxip source and rebuilding
+
+The image retains the exact unmodified upstream source archive at
+`/usr/share/orchard/sources/unxip-3.3.0.tar.gz` and its upstream `LICENSE` as the
+adjacent `unxip-3.3.0.LICENSE`. The archive is produced before compilation with
+`git archive` at the verified revision, a stable `unxip-3.3.0/` prefix, and
+`gzip -n`; it contains neither `.git` nor build output. Orchard's complete
+third-party notice and license directory is installed under
+`/usr/share/doc/orchard`.
+
+Copy and extract the retained source without mounting the host home directory:
+
+```sh
+source_dir=$PWD/orchard-container-sources
+install -d -m 0700 "$source_dir"
+podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
+  --volume "$source_dir:/workspace:Z" \
+  localhost/orchard:local \
+  cp /usr/share/orchard/sources/unxip-3.3.0.tar.gz \
+     /usr/share/orchard/sources/unxip-3.3.0.LICENSE /workspace/
+gzip -dc "$source_dir/unxip-3.3.0.tar.gz" | tar -xf - -C "$source_dir"
+```
+
+To reproduce the Linux build stage, build its named target from the same clean
+Orchard checkout:
+
+```sh
+podman build --file packaging/Containerfile \
+  --target orchard-unxip-build \
+  --tag localhost/orchard-unxip-build:local .
+```
+
+That stage uses the pinned Swift 6.3.3 image, verifies the fetched commit, and
+installs only `liblzma-dev=5.6.1+really5.4.5-1ubuntu0.3` and
+`zlib1g-dev=1:1.3.dfsg-3.1ubuntu2.2` as Ubuntu noble build dependencies. They
+are needed for unxip's Linux LZMA and zlib system-library targets and are not
+installed into the final runtime stage. The extracted archive can be rebuilt
+with `swift build --configuration release` in that same pinned Swift image after
+installing those exact packages.
 
 ## Physical USB devices
 

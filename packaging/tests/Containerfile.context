@@ -2,6 +2,9 @@ ARG PROBE_IMAGE=docker.io/library/golang:1.24.13-bookworm@sha256:1a6d4452c65dea3
 FROM ${PROBE_IMAGE}
 COPY . /context
 RUN test -f /context/go.mod \
+    && test -f /context/THIRD_PARTY_NOTICES.md \
+    && test -f /context/docs/third-party/context-license.txt \
+    && test -f /context/internal/context-allowed.go \
     && test ! -e /context/.git/context-sentinel \
     && test ! -e /context/.sandcastle/context-sentinel \
     && test ! -e /context/.orchard/context-sentinel \
@@ -13,7 +16,18 @@ RUN test -f /context/go.mod \
     && test ! -e /context/workspaces/context-sentinel \
     && test ! -e /context/projects/context-sentinel \
     && test ! -e /context/apps/context-sentinel \
+    && test ! -e /context/internal/demo.key \
+    && test ! -e /context/internal/demo.pem \
+    && test ! -e /context/internal/demo.xip \
+    && test ! -e /context/internal/.asc/config.json \
+    && test ! -e /context/internal/.orchard/state.json \
+    && test ! -e /context/internal/apps/demo/marker \
+    && test ! -e /context/internal/SDKs/iPhoneOS.sdk/marker \
     && test ! -e /context/context-sentinel.xip \
+    && test ! -e /context/context-sentinel.ipa \
     && test ! -e /context/context-sentinel.p8 \
+    && test ! -e /context/context-sentinel.key \
+    && test ! -e /context/context-sentinel.pem \
+    && test ! -e /context/context-sentinel.cer \
     && test ! -e /context/context-sentinel.mobileprovision \
     && test ! -e /context/context-sentinel.pairing-record

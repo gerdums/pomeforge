@@ -10,6 +10,8 @@ permissions:
 jobs:
   go:
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
@@ -18,11 +20,11 @@ jobs:
           check-latest: false
           cache: false
       - name: Test
-        run: go test ./...
+        run: GOOS=linux go test ./...
       - name: Vet
-        run: go vet ./...
+        run: GOOS=linux go vet ./...
       - name: Build native CLI
-        run: CGO_ENABLED=0 go build -trimpath -o /tmp/orchard ./cmd/orchard
+        run: CGO_ENABLED=0 GOOS=linux go build -trimpath -o /tmp/orchard ./cmd/orchard
       - name: Build Linux amd64
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /tmp/orchard-linux-amd64 ./cmd/orchard
       - name: Build Linux arm64
