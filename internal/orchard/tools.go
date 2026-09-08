@@ -128,7 +128,7 @@ func (r SystemToolResolver) probeDefinition(ctx context.Context, definition tool
 		status.Status = "unverified"
 		status.Detail = "Orchard has verified only xtool 1.19.0 command contracts; this version is not verified"
 	}
-	if definition.id == "asc" && !regexp.MustCompile(`(?i)^asc\s+version\s+5\.[0-9]+(?:\.[0-9]+)?(?:\s|$)`).MatchString(version) {
+	if definition.id == "asc" && !regexp.MustCompile(`(?i)^(?:asc\s+version\s+)?5\.[0-9]+(?:\.[0-9]+)?(?:\s|$)`).MatchString(version) {
 		status.Status = "incompatible"
 		status.Detail = "Orchard has verified ASC 5.x command contracts; found a different version"
 	}
