@@ -8,14 +8,14 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  go:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: '1.24.x'
-          check-latest: true
+          go-version: '1.24.13'
+          check-latest: false
           cache: false
       - name: Test
         run: go test ./...
@@ -27,3 +27,35 @@ jobs:
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /tmp/orchard-linux-amd64 ./cmd/orchard
       - name: Build Linux arm64
         run: CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o /tmp/orchard-linux-arm64 ./cmd/orchard
+
+  web-and-packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.20.0'
+      - name: Install GIO test utility
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libglib2.0-bin
+          gio version
+      - name: Test graphical workspace and desktop packaging
+        run: node --test packaging/tests/*.test.mjs
+      - name: Test container contracts
+        run: sh packaging/tests/container-contract.test.sh
+
+  asset-compiler:
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/library/swift:6.3.3@sha256:56ef1be2c1ca36f4c52440357dc1fcdfdb5e113587134fcadeef57c225c71b54
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Report pinned Swift version
+        run: swift --version
+      - name: Build AssetKit bridge from resolved dependencies
+        run: swift build --package-path tools/asset-compiler --configuration release --disable-automatic-resolution
+      - name: Test complete AssetKit bridge suite
+        run: swift test --package-path tools/asset-compiler --disable-automatic-resolution
+      - name: Verify resolved dependencies were not rewritten
+        run: git diff --exit-code -- tools/asset-compiler/Package.resolved

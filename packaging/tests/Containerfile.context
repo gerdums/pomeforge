@@ -1,0 +1,19 @@
+ARG PROBE_IMAGE=docker.io/library/golang:1.24.13-bookworm@sha256:1a6d4452c65dea36aac2e2d606b01b4a029ec90cc1ae53890540ce6173ea77ac
+FROM ${PROBE_IMAGE}
+COPY . /context
+RUN test -f /context/go.mod \
+    && test ! -e /context/.git/context-sentinel \
+    && test ! -e /context/.sandcastle/context-sentinel \
+    && test ! -e /context/.orchard/context-sentinel \
+    && test ! -e /context/.cache/context-sentinel \
+    && test ! -e /context/.swiftpm/context-sentinel \
+    && test ! -e /context/.build/context-sentinel \
+    && test ! -e /context/SDKs/context-sentinel \
+    && test ! -e /context/workspace/context-sentinel \
+    && test ! -e /context/workspaces/context-sentinel \
+    && test ! -e /context/projects/context-sentinel \
+    && test ! -e /context/apps/context-sentinel \
+    && test ! -e /context/context-sentinel.xip \
+    && test ! -e /context/context-sentinel.p8 \
+    && test ! -e /context/context-sentinel.mobileprovision \
+    && test ! -e /context/context-sentinel.pairing-record
