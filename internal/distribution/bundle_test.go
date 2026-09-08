@@ -26,7 +26,7 @@ func TestInspectIPAValidBinaryPlist(t *testing.T) {
 	if !result.Valid() || !result.Value.StructureValid {
 		t.Fatalf("valid IPA rejected: %+v", result.Problems)
 	}
-	if len(result.Value.SHA256) != 64 || result.Value.Bundle.BundleIdentifier != "com.example.Orchard" || result.Value.Bundle.MachO.LoadCommand != "LC_BUILD_VERSION" {
+	if len(result.Value.SHA256) != 64 || result.Value.Bundle.BundleIdentifier != "com.example.Pomeforge" || result.Value.Bundle.MachO.LoadCommand != "LC_BUILD_VERSION" {
 		t.Fatalf("unexpected report: %+v", result.Value)
 	}
 	if result.Value.Bundle.EmbeddedProfile == nil || result.Value.Bundle.EmbeddedProfile.Trust != TrustVerified {
@@ -45,12 +45,12 @@ func TestInspectIPARejectsUnsafeArchives(t *testing.T) {
 		{"traversal", "unsafe_archive_name", []zipEntry{{"../escape", []byte("x"), 0o600}}, false},
 		{"absolute", "unsafe_archive_name", []zipEntry{{"/escape", []byte("x"), 0o600}}, false},
 		{"backslash", "unsafe_archive_name", []zipEntry{{`Payload\\bad`, []byte("x"), 0o600}}, false},
-		{"duplicate", "duplicate_archive_entry", []zipEntry{{"Payload/Orchard.app/Info.plist", fixtureInfo(t, false), 0o600}}, false},
-		{"symlink", "unsafe_archive_entry_type", []zipEntry{{"Payload/Orchard.app/link", []byte("target"), os.ModeSymlink | 0o777}}, false},
-		{"symlink with trailing slash", "unsafe_archive_entry_type", []zipEntry{{"Payload/Orchard.app/link/", nil, os.ModeSymlink | 0o777}}, false},
-		{"nested extension", "unsupported_nested_extension", []zipEntry{{"Payload/Orchard.app/PlugIns/Widget.appex/Info.plist", []byte("x"), 0o600}}, false},
+		{"duplicate", "duplicate_archive_entry", []zipEntry{{"Payload/Pomeforge.app/Info.plist", fixtureInfo(t, false), 0o600}}, false},
+		{"symlink", "unsafe_archive_entry_type", []zipEntry{{"Payload/Pomeforge.app/link", []byte("target"), os.ModeSymlink | 0o777}}, false},
+		{"symlink with trailing slash", "unsafe_archive_entry_type", []zipEntry{{"Payload/Pomeforge.app/link/", nil, os.ModeSymlink | 0o777}}, false},
+		{"nested extension", "unsupported_nested_extension", []zipEntry{{"Payload/Pomeforge.app/PlugIns/Widget.appex/Info.plist", []byte("x"), 0o600}}, false},
 		{"extraneous top-level", "unsupported_archive_entry", []zipEntry{{"scratch/private-key.pem", []byte("secret"), 0o600}}, false},
-		{"framework", "unsupported_nested_framework", []zipEntry{{"Payload/Orchard.app/Frameworks/Kit.framework/Kit", []byte("x"), 0o700}}, false},
+		{"framework", "unsupported_nested_framework", []zipEntry{{"Payload/Pomeforge.app/Frameworks/Kit.framework/Kit", []byte("x"), 0o700}}, false},
 		{"multiple apps", "main_bundle_count", []zipEntry{{"Payload/Other.app/Info.plist", fixtureInfo(t, false), 0o600}}, false},
 		{"missing app", "main_bundle_count", []zipEntry{{"metadata", []byte("x"), 0o600}}, true},
 	}
@@ -84,16 +84,16 @@ func TestInspectIPARejectsArchivePathKindConflictsInEitherOrder(t *testing.T) {
 		last  zipEntry
 		codes []string
 	}{
-		{"file then directory", zipEntry{"Payload/Orchard.app/Resources", []byte("file"), 0o600}, zipEntry{"Payload/Orchard.app/Resources/", nil, os.ModeDir | 0o755}, []string{"archive_path_kind_collision"}},
-		{"directory then file", zipEntry{"Payload/Orchard.app/Resources/", nil, os.ModeDir | 0o755}, zipEntry{"Payload/Orchard.app/Resources", []byte("file"), 0o600}, []string{"archive_path_kind_collision"}},
+		{"file then directory", zipEntry{"Payload/Pomeforge.app/Resources", []byte("file"), 0o600}, zipEntry{"Payload/Pomeforge.app/Resources/", nil, os.ModeDir | 0o755}, []string{"archive_path_kind_collision"}},
+		{"directory then file", zipEntry{"Payload/Pomeforge.app/Resources/", nil, os.ModeDir | 0o755}, zipEntry{"Payload/Pomeforge.app/Resources", []byte("file"), 0o600}, []string{"archive_path_kind_collision"}},
 		{"Payload file before descendants", zipEntry{"Payload", []byte("file"), 0o600}, zipEntry{}, []string{"archive_file_ancestor", "archive_required_directory"}},
 		{"Payload file after descendants", zipEntry{}, zipEntry{"Payload", []byte("file"), 0o600}, []string{"archive_file_ancestor", "archive_required_directory"}},
-		{"app file before descendants", zipEntry{"Payload/Orchard.app", []byte("file"), 0o600}, zipEntry{}, []string{"archive_file_ancestor", "archive_required_directory"}},
-		{"app file after descendants", zipEntry{}, zipEntry{"Payload/Orchard.app", []byte("file"), 0o600}, []string{"archive_file_ancestor", "archive_required_directory"}},
-		{"nested file before descendant", zipEntry{"Payload/Orchard.app/Nested", []byte("file"), 0o600}, zipEntry{"Payload/Orchard.app/Nested/value", []byte("value"), 0o600}, []string{"archive_file_ancestor"}},
-		{"nested file after descendant", zipEntry{"Payload/Orchard.app/Nested/value", []byte("value"), 0o600}, zipEntry{"Payload/Orchard.app/Nested", []byte("file"), 0o600}, []string{"archive_file_ancestor"}},
-		{"directory mode without slash", zipEntry{"Payload/Orchard.app/Resources", nil, os.ModeDir | 0o755}, zipEntry{}, []string{"archive_path_kind_mismatch"}},
-		{"file mode with slash", zipEntry{"Payload/Orchard.app/Resources/", nil, 0o600}, zipEntry{}, []string{"archive_path_kind_mismatch"}},
+		{"app file before descendants", zipEntry{"Payload/Pomeforge.app", []byte("file"), 0o600}, zipEntry{}, []string{"archive_file_ancestor", "archive_required_directory"}},
+		{"app file after descendants", zipEntry{}, zipEntry{"Payload/Pomeforge.app", []byte("file"), 0o600}, []string{"archive_file_ancestor", "archive_required_directory"}},
+		{"nested file before descendant", zipEntry{"Payload/Pomeforge.app/Nested", []byte("file"), 0o600}, zipEntry{"Payload/Pomeforge.app/Nested/value", []byte("value"), 0o600}, []string{"archive_file_ancestor"}},
+		{"nested file after descendant", zipEntry{"Payload/Pomeforge.app/Nested/value", []byte("value"), 0o600}, zipEntry{"Payload/Pomeforge.app/Nested", []byte("file"), 0o600}, []string{"archive_file_ancestor"}},
+		{"directory mode without slash", zipEntry{"Payload/Pomeforge.app/Resources", nil, os.ModeDir | 0o755}, zipEntry{}, []string{"archive_path_kind_mismatch"}},
+		{"file mode with slash", zipEntry{"Payload/Pomeforge.app/Resources/", nil, 0o600}, zipEntry{}, []string{"archive_path_kind_mismatch"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -132,9 +132,9 @@ func TestInspectIPAAcceptsImplicitAndExplicitDirectories(t *testing.T) {
 		{"implicit", nil},
 		{"explicit", []zipEntry{
 			{"Payload/", nil, os.ModeDir | 0o755},
-			{"Payload/Orchard.app/", nil, os.ModeDir | 0o755},
-			{"Payload/Orchard.app/Resources/", nil, os.ModeDir | 0o755},
-			{"Payload/Orchard.app/Resources/value", []byte("value"), 0o600},
+			{"Payload/Pomeforge.app/", nil, os.ModeDir | 0o755},
+			{"Payload/Pomeforge.app/Resources/", nil, os.ModeDir | 0o755},
+			{"Payload/Pomeforge.app/Resources/value", []byte("value"), 0o600},
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -162,10 +162,10 @@ func TestExecutableMetadataIsValidatedBeforeBundleOrArchiveRead(t *testing.T) {
 		{"dot", "."},
 		{"dotdot", ".."},
 		{"traversal", "../outside"},
-		{"slash", "sub/Orchard"},
-		{"backslash", `sub\Orchard`},
-		{"nul", "Orchard\x00outside"},
-		{"control", "Orchard\noutside"},
+		{"slash", "sub/Pomeforge"},
+		{"backslash", `sub\Pomeforge`},
+		{"nul", "Pomeforge\x00outside"},
+		{"control", "Pomeforge\noutside"},
 		{"volume syntax", "C:outside"},
 	}
 	f := newCryptoFixture(t)
@@ -189,7 +189,7 @@ func TestExecutableMetadataIsValidatedBeforeBundleOrArchiveRead(t *testing.T) {
 
 			entries := append([]zipEntry{}, baseEntries...)
 			for i := range entries {
-				if entries[i].name == "Payload/Orchard.app/Info.plist" {
+				if entries[i].name == "Payload/Pomeforge.app/Info.plist" {
 					entries[i].data = fixtureInfoWith(t, "CFBundleExecutable", tc.value)
 				}
 			}
@@ -234,18 +234,18 @@ func TestInspectIPARejectsUnsafePermissionsAndIconBytes(t *testing.T) {
 	}{
 		{"non-executable main", "unsafe_archive_executable_mode", func(entries []zipEntry) []zipEntry {
 			for i := range entries {
-				if entries[i].name == "Payload/Orchard.app/Orchard" {
+				if entries[i].name == "Payload/Pomeforge.app/Pomeforge" {
 					entries[i].mode = 0o666
 				}
 			}
 			return entries
 		}},
 		{"non-traversable directory", "unsafe_archive_directory_mode", func(entries []zipEntry) []zipEntry {
-			return append(entries, zipEntry{"Payload/Orchard.app/Resources/", nil, os.ModeDir | 0o600})
+			return append(entries, zipEntry{"Payload/Pomeforge.app/Resources/", nil, os.ModeDir | 0o600})
 		}},
 		{"malformed icon", "invalid_icon_png", func(entries []zipEntry) []zipEntry {
 			for i := range entries {
-				if entries[i].name == "Payload/Orchard.app/AppIcon60x60@3x.png" {
+				if entries[i].name == "Payload/Pomeforge.app/AppIcon60x60@3x.png" {
 					entries[i].data = []byte("not-png")
 				}
 			}
@@ -254,7 +254,7 @@ func TestInspectIPARejectsUnsafePermissionsAndIconBytes(t *testing.T) {
 		{"missing marketing icon", "missing_icon_file", func(entries []zipEntry) []zipEntry {
 			var kept []zipEntry
 			for _, entry := range entries {
-				if entry.name != "Payload/Orchard.app/AppIcon1024x1024.png" {
+				if entry.name != "Payload/Pomeforge.app/AppIcon1024x1024.png" {
 					kept = append(kept, entry)
 				}
 			}
@@ -280,7 +280,7 @@ func TestInspectIPARejectsSuspiciousCompressionAndLimits(t *testing.T) {
 	cms := f.profile(t, profileOptions{})
 	dir := t.TempDir()
 	entries := validIPAEntries(t, cms, false)
-	entries = append(entries, zipEntry{"Payload/Orchard.app/zeros", make([]byte, 1<<20), 0o600})
+	entries = append(entries, zipEntry{"Payload/Pomeforge.app/zeros", make([]byte, 1<<20), 0o600})
 	ipa := filepath.Join(dir, "ratio.ipa")
 	writeIPA(t, ipa, entries)
 	result, err := InspectIPA(context.Background(), ipa, InspectionOptions{CurrentTime: f.now, Limits: Limits{MaxCompressionRatio: 10}})

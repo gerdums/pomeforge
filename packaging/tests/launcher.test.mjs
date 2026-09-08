@@ -21,7 +21,7 @@ async function readEventually(filePath) {
 }
 
 test("GIO interprets the installed desktop entry with special path characters", async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), "orchard package test "));
+  const root = await mkdtemp(path.join(tmpdir(), "pomeforge package test "));
   t.after(async () => {
     const { rm } = await import("node:fs/promises");
     await rm(root, { recursive: true, force: true });
@@ -30,29 +30,29 @@ test("GIO interprets the installed desktop entry with special path characters", 
   const home = path.join(root, "user home");
   const dataHome = path.join(root, "xdg & | ' \" \\ $ ` data");
   const sourceDir = path.join(root, "prebuilt files");
-  const sourceBinary = path.join(sourceDir, "orchard build");
+  const sourceBinary = path.join(sourceDir, "pomeforge build");
   const argumentLog = path.join(root, "arguments.log");
   await mkdir(home, { recursive: true });
   await mkdir(sourceDir, { recursive: true });
-  await mkdir(path.join(dataHome, "orchard"), { recursive: true });
-  await writeFile(path.join(dataHome, "orchard", "unrelated.txt"), "preserve me\n");
-  await writeFile(sourceBinary, "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$ORCHARD_ARG_LOG\"\n");
+  await mkdir(path.join(dataHome, "pomeforge"), { recursive: true });
+  await writeFile(path.join(dataHome, "pomeforge", "unrelated.txt"), "preserve me\n");
+  await writeFile(sourceBinary, "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$POMEFORGE_ARG_LOG\"\n");
   await chmod(sourceBinary, 0o755);
 
-  const environment = { ...process.env, HOME: home, XDG_DATA_HOME: dataHome, ORCHARD_ARG_LOG: argumentLog };
+  const environment = { ...process.env, HOME: home, XDG_DATA_HOME: dataHome, POMEFORGE_ARG_LOG: argumentLog };
   const installResult = spawnSync(path.join(packagingDir, "install.sh"), [sourceBinary], {
     env: environment, encoding: "utf8"
   });
   assert.equal(installResult.status, 0, installResult.stderr);
-  assert.equal(await readFile(path.join(dataHome, "orchard", "unrelated.txt"), "utf8"), "preserve me\n");
+  assert.equal(await readFile(path.join(dataHome, "pomeforge", "unrelated.txt"), "utf8"), "preserve me\n");
 
-  const desktopPath = path.join(dataHome, "applications", "orchard.desktop");
+  const desktopPath = path.join(dataHome, "applications", "pomeforge.desktop");
   const desktop = await readFile(desktopPath, "utf8");
   assert.match(desktop, /^Exec=".+"$/m);
 
   const workspace = path.join(root, "Projects 100% & | ' \" \\ $ ` ready");
-  const launchResult = spawnSync(path.join(dataHome, "orchard", "bin", "orchard-workspace"), [], {
-    env: { ...environment, ORCHARD_WORKSPACE: workspace }, encoding: "utf8"
+  const launchResult = spawnSync(path.join(dataHome, "pomeforge", "bin", "pomeforge-workspace"), [], {
+    env: { ...environment, POMEFORGE_WORKSPACE: workspace }, encoding: "utf8"
   });
   assert.equal(launchResult.status, 0, launchResult.stderr);
   const argumentsSeen = (await readFile(argumentLog, "utf8")).trimEnd().split("\n");
@@ -60,7 +60,7 @@ test("GIO interprets the installed desktop entry with special path characters", 
 
   await writeFile(argumentLog, "");
   const gioResult = spawnSync("gio", ["launch", desktopPath], {
-    env: { ...environment, ORCHARD_WORKSPACE: workspace }, encoding: "utf8"
+    env: { ...environment, POMEFORGE_WORKSPACE: workspace }, encoding: "utf8"
   });
   assert.equal(gioResult.status, 0, `${gioResult.stderr}\n${desktop}`);
   const desktopArguments = (await readEventually(argumentLog)).trimEnd().split("\n");
@@ -68,14 +68,14 @@ test("GIO interprets the installed desktop entry with special path characters", 
 });
 
 test("unrepresentable install roots fail before writes", async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), "orchard rejected path test "));
+  const root = await mkdtemp(path.join(tmpdir(), "pomeforge rejected path test "));
   t.after(async () => {
     const { rm } = await import("node:fs/promises");
     await rm(root, { recursive: true, force: true });
   });
 
   const home = path.join(root, "home");
-  const sourceBinary = path.join(root, "orchard");
+  const sourceBinary = path.join(root, "pomeforge");
   await mkdir(home, { recursive: true });
   await writeFile(sourceBinary, "#!/bin/sh\nexit 0\n");
   await chmod(sourceBinary, 0o755);
@@ -91,24 +91,24 @@ test("unrepresentable install roots fail before writes", async (t) => {
 });
 
 test("relative XDG_DATA_HOME uses the same standard default for install and launch", async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), "orchard relative xdg test "));
+  const root = await mkdtemp(path.join(tmpdir(), "pomeforge relative xdg test "));
   t.after(async () => {
     const { rm } = await import("node:fs/promises");
     await rm(root, { recursive: true, force: true });
   });
 
   const home = path.join(root, "user home");
-  const sourceBinary = path.join(root, "orchard");
+  const sourceBinary = path.join(root, "pomeforge");
   const argumentLog = path.join(root, "arguments.log");
   await mkdir(home, { recursive: true });
-  await writeFile(sourceBinary, "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$ORCHARD_ARG_LOG\"\n");
+  await writeFile(sourceBinary, "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$POMEFORGE_ARG_LOG\"\n");
   await chmod(sourceBinary, 0o755);
 
   const environment = {
     ...process.env,
     HOME: home,
     XDG_DATA_HOME: "relative-data-home",
-    ORCHARD_ARG_LOG: argumentLog
+    POMEFORGE_ARG_LOG: argumentLog
   };
   const installResult = spawnSync(path.join(packagingDir, "install.sh"), [sourceBinary], {
     env: environment, encoding: "utf8", cwd: root
@@ -116,19 +116,19 @@ test("relative XDG_DATA_HOME uses the same standard default for install and laun
   assert.equal(installResult.status, 0, installResult.stderr);
 
   const defaultDataHome = path.join(home, ".local", "share");
-  const launcher = path.join(defaultDataHome, "orchard", "bin", "orchard-workspace");
+  const launcher = path.join(defaultDataHome, "pomeforge", "bin", "pomeforge-workspace");
   await access(launcher);
   await assert.rejects(access(path.join(root, "relative-data-home")), { code: "ENOENT" });
   const launchResult = spawnSync(launcher, [], { env: environment, encoding: "utf8", cwd: root });
   assert.equal(launchResult.status, 0, launchResult.stderr);
   const argumentsSeen = (await readFile(argumentLog, "utf8")).trimEnd().split("\n");
   assert.deepEqual(argumentsSeen, [
-    "app", "--open", "--workspace", path.join(defaultDataHome, "orchard", "workspace"), "--listen", "127.0.0.1:0"
+    "app", "--open", "--workspace", path.join(defaultDataHome, "pomeforge", "workspace"), "--listen", "127.0.0.1:0"
   ]);
 });
 
 test("documented uninstall ignores a relative XDG_DATA_HOME", async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), "orchard uninstall docs test "));
+  const root = await mkdtemp(path.join(tmpdir(), "pomeforge uninstall docs test "));
   t.after(async () => {
     const { rm } = await import("node:fs/promises");
     await rm(root, { recursive: true, force: true });
@@ -138,10 +138,10 @@ test("documented uninstall ignores a relative XDG_DATA_HOME", async (t) => {
   const defaultDataHome = path.join(home, ".local", "share");
   const relativeDataHome = path.join(root, "relative-data-home");
   const installedFiles = [
-    "applications/orchard.desktop",
-    "icons/hicolor/scalable/apps/orchard.svg",
-    "orchard/bin/orchard-workspace",
-    "orchard/bin/orchard"
+    "applications/pomeforge.desktop",
+    "icons/hicolor/scalable/apps/pomeforge.svg",
+    "pomeforge/bin/pomeforge-workspace",
+    "pomeforge/bin/pomeforge"
   ];
   for (const relativePath of installedFiles) {
     await mkdir(path.dirname(path.join(defaultDataHome, relativePath)), { recursive: true });
@@ -167,9 +167,9 @@ test("documented uninstall ignores a relative XDG_DATA_HOME", async (t) => {
 });
 
 test("packaging sources do not embed a developer home path or parse startup output", async () => {
-  const launcher = await readFile(path.join(packagingDir, "orchard-workspace"), "utf8");
+  const launcher = await readFile(path.join(packagingDir, "pomeforge-workspace"), "utf8");
   const installer = await readFile(path.join(packagingDir, "install.sh"), "utf8");
   assert.doesNotMatch(`${launcher}\n${installer}`, /\/home\/[A-Za-z0-9._-]+/);
   assert.doesNotMatch(launcher, /eval|grep|sed|token=/);
-  assert.match(launcher, /exec "\$orchard_binary" app --open --workspace "\$orchard_workspace" --listen 127\.0\.0\.1:0/);
+  assert.match(launcher, /exec "\$pomeforge_binary" app --open --workspace "\$pomeforge_workspace" --listen 127\.0\.0\.1:0/);
 });

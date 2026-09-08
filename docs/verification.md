@@ -2,6 +2,8 @@
 
 Integration and review are in progress. The records below distinguish actual execution from the final composed application's pending checks. All compilation, asset processing, signing, tests, and browser automation described here ran in Linux containers. The workstation orchestrated those containers and edited source; it did not compile iOS code or run Xcode.
 
+Pomeforge was developed under the name Orchard. Earlier records below intentionally retain that prior name, along with their original commands, artifact identities, hashes, and source revisions; they are not exact-source Pomeforge proof.
+
 | Check | Source and environment | Result |
 | --- | --- | --- |
 | CLI and graphical workspace baseline | Orchard `3ad6596e00e37ac32e20f2c94997e9abdb94af8a`; Linux arm64 | 75 Go test pass events, vet, arm64/amd64 builds, live Chromium project creation and blocked-build flow, authentication/Origin rejection, narrow viewport, screenshots and video |

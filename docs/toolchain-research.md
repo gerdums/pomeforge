@@ -1,6 +1,6 @@
 # Linux iOS toolchain research
 
-Verified against upstream documentation and source on 2026-09-08. This is a technical implementation plan, not a claim that Orchard has built, installed, uploaded, or passed App Review with an app. Public repository source was inspected without using Apple credentials.
+Verified against upstream documentation and source on 2026-09-08. This is a technical implementation plan, not a claim that Pomeforge has built, installed, uploaded, or passed App Review with an app. Public repository source was inspected without using Apple credentials.
 
 ## What can run on Linux
 
@@ -40,7 +40,7 @@ AppImage covers packaging, not every Linux configuration. Check CPU architecture
 
 ## xtool adapter
 
-[Linux installation](https://github.com/xtool-org/xtool/blob/1.19.0/Documentation/xtool.docc/Installation-Linux.md) requires Swift 6.3, usbmuxd and Xcode 26 `.xip`. The user obtains the XIP through Apple's authenticated [downloads page](https://developer.apple.com/download/all/?q=Xcode). Orchard's verified Linux path extracts the archive with unxip, constructs the Darwin SDK with xtool, stages Clang headers with user ownership, and installs the bundle with Swift. Do not mirror or bundle Apple's SDK in Orchard's releases.
+[Linux installation](https://github.com/xtool-org/xtool/blob/1.19.0/Documentation/xtool.docc/Installation-Linux.md) requires Swift 6.3, usbmuxd and Xcode 26 `.xip`. The user obtains the XIP through Apple's authenticated [downloads page](https://developer.apple.com/download/all/?q=Xcode). Pomeforge's verified Linux path extracts the archive with unxip, constructs the Darwin SDK with xtool, stages Clang headers with user ownership, and installs the bundle with Swift. Do not mirror or bundle Apple's SDK in Pomeforge's releases.
 
 ```sh
 swift --version
@@ -51,7 +51,7 @@ xtool new Hello --skip-setup
 
 The `sdk build` example is one stage, not the complete import procedure. Upstream `xtool sdk install` attempted to preserve root ownership of Clang headers in our non-root Linux test and failed. The working native installation and explicit XDG store are documented in [Linux toolchain decisions](linux-toolchain-decisions.md). An archive path must not be presented as a working argument to `xtool sdk install`.
 
-`--skip-setup` prevents `new` from starting interactive Apple authentication and SDK setup. `xtool setup` offers public ASC API-key authentication for paid accounts, or Apple ID/password/2FA through private APIs. Use the public-key route for the normal paid-developer workflow. Secrets go to tools through private files or interactive input, never Orchard plan JSON or logs.
+`--skip-setup` prevents `new` from starting interactive Apple authentication and SDK setup. `xtool setup` offers public ASC API-key authentication for paid accounts, or Apple ID/password/2FA through private APIs. Use the public-key route for the normal paid-developer workflow. Secrets go to tools through private files or interactive input, never Pomeforge plan JSON or logs.
 
 From inside the generated project:
 
@@ -65,7 +65,7 @@ xtool install --udid DEVICE_UDID /path/to/App.ipa
 xtool launch --udid DEVICE_UDID com.example.Hello
 ```
 
-`build` accepts `--triple`, defaulting to `arm64-apple-ios`. An ordinary build writes `xtool/PRODUCT.app`; `--ipa` writes `xtool/PRODUCT.ipa`. `--sign` is development signing. The source requests `certificateType: development` and `profileType: iosAppDevelopment`, even with `--configuration release`. `xtool install` invokes the integrated provisioning/signing installer, so use a plain installation tool to preserve a previously chosen signing identity. Device commands can wait indefinitely; Orchard must set timeouts and select a UDID explicitly in automation.
+`build` accepts `--triple`, defaulting to `arm64-apple-ios`. An ordinary build writes `xtool/PRODUCT.app`; `--ipa` writes `xtool/PRODUCT.ipa`. `--sign` is development signing. The source requests `certificateType: development` and `profileType: iosAppDevelopment`, even with `--configuration release`. `xtool install` invokes the integrated provisioning/signing installer, so use a plain installation tool to preserve a previously chosen signing identity. Device commands can wait indefinitely; Pomeforge must set timeouts and select a UDID explicitly in automation.
 
 Sources: [build command](https://github.com/xtool-org/xtool/blob/1.19.0/Sources/XToolSupport/DevCommand.swift), [profile issuance](https://github.com/xtool-org/xtool/blob/1.19.0/Sources/XKit/DeveloperServices/Profiles/DeveloperServicesFetchProfileOperation.swift), [certificate issuance](https://github.com/xtool-org/xtool/blob/1.19.0/Sources/XKit/DeveloperServices/Certificates/DeveloperServicesFetchCertificateOperation.swift), [installation command](https://github.com/xtool-org/xtool/blob/1.19.0/Sources/XToolSupport/InstallCommand.swift).
 
@@ -120,21 +120,21 @@ Native scope starts with SwiftUI/UIKit applications and supported SwiftPM depend
 
 xtool's [open PR 219](https://github.com/xtool-org/xtool/pull/219) moved its clean-room compiler into [xtool-org/AssetKit](https://github.com/xtool-org/AssetKit). Current source builds `Assets.car` on Linux and emits the app-icon plist additions and loose PNG files needed by SpringBoard. It supports PNG app icons, PNG/JPEG/SVG images and color sets. PDF vectors, data/sticker sets, AR objects and non-iOS variants remain outside its documented support. SVG input needs `rsvg-convert`; PNG app icons do not.
 
-The package product is `AssetKit`. Its current manifest requires Swift tools 6.3, with `swift-png` and vendored BSD-licensed LZFSE C sources. Orchard can ship a small executable package depending on a reviewed revision:
+The package product is `AssetKit`. Its current manifest requires Swift tools 6.3, with `swift-png` and vendored BSD-licensed LZFSE C sources. Pomeforge can ship a small executable package depending on a reviewed revision:
 
 ```swift
 // swift-tools-version: 6.3
 import PackageDescription
 
 let package = Package(
-    name: "OrchardAssets",
-    products: [.executable(name: "orchard-assets", targets: ["OrchardAssets"])],
+    name: "PomeforgeAssets",
+    products: [.executable(name: "pomeforge-assets", targets: ["PomeforgeAssets"])],
     dependencies: [
         .package(url: "https://github.com/xtool-org/AssetKit",
                  revision: "e763558b55fcbb5a443b1d7b2c6f0972d8bd14f7")
     ],
     targets: [
-        .executableTarget(name: "OrchardAssets", dependencies: [
+        .executableTarget(name: "PomeforgeAssets", dependencies: [
             .product(name: "AssetKit", package: "AssetKit")
         ])
     ]
@@ -159,7 +159,7 @@ if let icons = result.appIconBundle {
 }
 ```
 
-Build the Linux host executable with `swift build --package-path tools/asset-compiler -c release`. Orchard's implemented bridge accepts `orchard-assets compile --catalog CATALOG.xcassets --app STAGED.app --minimum-ios 17.0 --json`. That interface is Orchard's adapter contract, not an upstream AssetKit command. Compilation must finish before signing, because editing Info.plist or resources invalidates signatures.
+Build the Linux host executable with `swift build --package-path tools/asset-compiler -c release`. Pomeforge's implemented bridge accepts `pomeforge-assets compile --catalog CATALOG.xcassets --app STAGED.app --minimum-ios 17.0 --json`. That interface is Pomeforge's adapter contract, not an upstream AssetKit command. Compilation must finish before signing, because editing Info.plist or resources invalidates signatures.
 
 AssetKit documents deterministic Linux/macOS bytes and a macOS CI check using Apple's `assetutil`. Those checks establish format parsing for fixtures, not acceptance of every app by App Store Connect. Retain an app-icon device screenshot and a successful build-processing receipt for the actual release candidate. [Compiler API](https://github.com/xtool-org/AssetKit/blob/e763558b55fcbb5a443b1d7b2c6f0972d8bd14f7/Sources/AssetKit/XCAssetCompiler.swift).
 
@@ -170,7 +170,7 @@ Use ASC for certificate/provisioning resource management and zsign for binary si
 The following are command contracts for user-authorized account operations. Use private state directories outside the project and read IDs from the returned JSON.
 
 ```sh
-asc auth login --bypass-keychain --name orchard \
+asc auth login --bypass-keychain --name pomeforge \
   --key-id KEY_ID --issuer-id ISSUER_ID --private-key /private/AuthKey.p8
 asc auth status --validate
 asc bundle-ids create --identifier com.example.Hello --name Hello \
@@ -193,7 +193,7 @@ OpenSSL is an alternative CSR generator:
 umask 077
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /private/distribution.key
 openssl req -new -sha256 -key /private/distribution.key \
-  -out /private/distribution.csr -subj '/CN=Orchard Distribution'
+  -out /private/distribution.csr -subj '/CN=Pomeforge Distribution'
 ```
 
 Decode `.data.attributes.certificateContent` from ASC's certificate response to DER, then convert it to PEM with `openssl x509 -inform DER -in certificate.cer -out certificate.pem`. Never put private key bytes in a JSON response or build receipt.
@@ -209,15 +209,15 @@ zsign -C dist/Hello.ipa
 
 For zsign 1.1.2 to create an IPA, the app must be beneath a `Payload` directory. It archives the directory containing `Payload`, so that archive root must contain only intended IPA content. Keep key/certificate files, entitlements, catalog scratch data, and the output IPA outside it. A Linux run with the pinned binary reproduced a successful signature followed by “Can't find payload directory!” when this layout was absent. [Pinned packaging implementation](https://github.com/zhlynn/zsign/blob/v1.1.2/src/zsign.cpp#L479-L498).
 
-`-m` can repeat for extension profiles. `-C` checks certificate/OCSP status; it is not a complete Apple archive validator. The documented `-p` option puts a password on argv. Orchard should instead use a short-lived protected PEM file, or upstream a file-descriptor/password-file interface before supporting encrypted P12 input. Do not silently use ad-hoc signatures or development profiles for an App Store build. [zsign source and CLI](https://github.com/zhlynn/zsign/tree/v1.1.2).
+`-m` can repeat for extension profiles. `-C` checks certificate/OCSP status; it is not a complete Apple archive validator. The documented `-p` option puts a password on argv. Pomeforge should instead use a short-lived protected PEM file, or upstream a file-descriptor/password-file interface before supporting encrypted P12 input. Do not silently use ad-hoc signatures or development profiles for an App Store build. [zsign source and CLI](https://github.com/zhlynn/zsign/tree/v1.1.2).
 
-Before signing, bind the exact bundle ID, team ID, profile UUID, certificate fingerprint and artifact hash. Verify the certificate private-key match, expiry, profile certificate membership, distribution profile type, and entitlement compatibility. The signing entitlements must reflect the profile's application identifier/team prefix and the app's approved capabilities. App Store signatures must not enable `get-task-allow`; reject development devices/profiles for this route. Extensions need their own identifiers and profiles. Capabilities that require Apple's separate approval cannot be granted by Orchard.
+Before signing, bind the exact bundle ID, team ID, profile UUID, certificate fingerprint and artifact hash. Verify the certificate private-key match, expiry, profile certificate membership, distribution profile type, and entitlement compatibility. The signing entitlements must reflect the profile's application identifier/team prefix and the app's approved capabilities. App Store signatures must not enable `get-task-allow`; reject development devices/profiles for this route. Extensions need their own identifiers and profiles. Capabilities that require Apple's separate approval cannot be granted by Pomeforge.
 
 ## App bundle preparation and upload
 
 The stable xtool packer supplies basic bundle values but does not establish a complete App Store archive. Its [open distribution issue](https://github.com/xtool-org/xtool/issues/117) reports missing `DTPlatformName`, rejected SDK provenance and a later successful workaround using Xcode. This is evidence of integration work still needed, not proof of native-Linux upload success.
 
-Orchard should record actual SDK metadata while importing the XIP, then derive values from that selected SDK and toolchain rather than inventing Xcode versions. Inspect `DTPlatformName`, `DTPlatformVersion`, `DTPlatformBuild`, `DTSDKName`, `DTSDKBuild`, `DTXcode`, `DTXcodeBuild`, Mach-O `LC_BUILD_VERSION` minimum/SDK values and linked frameworks. App bundle validation should also check exact `CFBundleIdentifier`, version/build numbers, executable, device families, icon catalog, privacy manifests/descriptions, and extension metadata. Missing truthful provenance is a diagnostic, not permission to spoof metadata.
+Pomeforge should record actual SDK metadata while importing the XIP, then derive values from that selected SDK and toolchain rather than inventing Xcode versions. Inspect `DTPlatformName`, `DTPlatformVersion`, `DTPlatformBuild`, `DTSDKName`, `DTSDKBuild`, `DTXcode`, `DTXcodeBuild`, Mach-O `LC_BUILD_VERSION` minimum/SDK values and linked frameworks. App bundle validation should also check exact `CFBundleIdentifier`, version/build numbers, executable, device families, icon catalog, privacy manifests/descriptions, and extension metadata. Missing truthful provenance is a diagnostic, not permission to spoof metadata.
 
 Apple currently says that uploads since **2026-04-28** must use **Xcode 26 or later and iOS/iPadOS 26 SDK or later**. That is Apple's stated requirement. A cross-compiler using extracted SDK contents is not proven equivalent merely by populating `DTXcode`. [Current upload requirements](https://developer.apple.com/news/upcoming-requirements/).
 
@@ -238,11 +238,11 @@ asc review submit --app APP_ID --version-id VERSION_ID \
   --build-id BUILD_ID --platform IOS --confirm --output json
 ```
 
-The combined upstream flow is `asc publish appstore --app APP_ID --ipa dist/Hello.ipa --version 1.0.0 --submit --confirm`. Orchard should normally keep upload, validation and submission separate so the approved binary is identifiable and retries cannot accidentally create another release.
+The combined upstream flow is `asc publish appstore --app APP_ID --ipa dist/Hello.ipa --version 1.0.0 --submit --confirm`. Pomeforge should normally keep upload, validation and submission separate so the approved binary is identifiable and retries cannot accidentally create another release.
 
 In ASC 5, **`asc submit create` was removed**. The supported command is `asc review submit`. It requires `--app`, `--build-id`, exactly one of `--version` or `--version-id`, and `--confirm` unless `--dry-run`. `--build` is not a valid alias. `asc validate` also takes exactly one of `--version` or `--version-id`; `--strict` treats warnings as errors. These are remote App Store version checks, not local IPA validation. [Submit source](https://github.com/rorkai/App-Store-Connect-CLI/blob/5.0.0/internal/cli/reviews/review_submit.go), [validation source](https://github.com/rorkai/App-Store-Connect-CLI/blob/5.0.0/internal/cli/validate/validate.go).
 
-Keep Apple's upload URL capabilities and API tokens out of logs. ASC telemetry is enabled by default in current source; Orchard can set `ASC_TELEMETRY_DISABLED=1` and `DO_NOT_TRACK=1` for its managed subprocesses. API-key auth and Apple web-session auth are separate. Account enrollment, agreements, App Privacy publication and some declarations require an explicit guided browser step or a separately supported web adapter. Source code for an API client is not proof those prerequisites are satisfied for a user's account.
+Keep Apple's upload URL capabilities and API tokens out of logs. ASC telemetry is enabled by default in current source; Pomeforge can set `ASC_TELEMETRY_DISABLED=1` and `DO_NOT_TRACK=1` for its managed subprocesses. API-key auth and Apple web-session auth are separate. Account enrollment, agreements, App Privacy publication and some declarations require an explicit guided browser step or a separately supported web adapter. Source code for an API client is not proof those prerequisites are satisfied for a user's account.
 
 ## Physical iPhone and iPad testing
 
@@ -274,9 +274,9 @@ The raw stream is length-prefixed RTP/HEVC, not an MP4 recording. The upstream `
 
 ## SDK license boundary
 
-Apple's currently published [Xcode and Apple SDKs Agreement](https://www.apple.com/legal/sla/docs/xcode.pdf) defines the SDKs as Apple Software. Its opening statement restricts execution to an Apple-branded product running macOS. Section 2.2.A limits installation to Apple-branded computers; section 2.5 prohibits separate SDK use and running parts on non-Apple hardware; section 2.7 restricts use and redistribution. Those are source terms, not an Orchard legal opinion about enforceability, exceptions or an individual user's additional agreements.
+Apple's currently published [Xcode and Apple SDKs Agreement](https://www.apple.com/legal/sla/docs/xcode.pdf) defines the SDKs as Apple Software. Its opening statement restricts execution to an Apple-branded product running macOS. Section 2.2.A limits installation to Apple-branded computers; section 2.5 prohibits separate SDK use and running parts on non-Apple hardware; section 2.7 restricts use and redistribution. Those are source terms, not a Pomeforge legal opinion about enforceability, exceptions or an individual user's additional agreements.
 
-Consequently, manually downloading Xcode and accepting its license does not by itself establish permission for the Linux route. Keep Apple's files out of public packages, provide the original terms in setup, and obtain appropriate licensing advice or permission before marketing a native SDK workflow as licensed. This prerequisite does not change the technical product scope: Orchard must not add a macOS build service as a workaround. The entire build implementation remains on Linux.
+Consequently, manually downloading Xcode and accepting its license does not by itself establish permission for the Linux route. Keep Apple's files out of public packages, provide the original terms in setup, and obtain appropriate licensing advice or permission before marketing a native SDK workflow as licensed. This prerequisite does not change the technical product scope: Pomeforge must not add a macOS build service as a workaround. The entire build implementation remains on Linux.
 
 ## Recommended implementation order
 

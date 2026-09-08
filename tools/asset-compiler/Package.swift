@@ -2,9 +2,9 @@
 import PackageDescription
 
 let package = Package(
-    name: "OrchardAssets",
+    name: "PomeforgeAssets",
     products: [
-        .executable(name: "orchard-assets", targets: ["OrchardAssets"]),
+        .executable(name: "pomeforge-assets", targets: ["PomeforgeAssets"]),
     ],
     dependencies: [
         .package(
@@ -14,18 +14,18 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "OrchardAssetsCore",
+            name: "PomeforgeAssetsCore",
             dependencies: [
                 .product(name: "AssetKit", package: "AssetKit"),
             ]
         ),
         .executableTarget(
-            name: "OrchardAssets",
-            dependencies: ["OrchardAssetsCore"]
+            name: "PomeforgeAssets",
+            dependencies: ["PomeforgeAssetsCore"]
         ),
         .testTarget(
-            name: "OrchardAssetsCoreTests",
-            dependencies: ["OrchardAssetsCore"]
+            name: "PomeforgeAssetsCoreTests",
+            dependencies: ["PomeforgeAssetsCore"]
         ),
     ],
     swiftLanguageModes: [.v6]

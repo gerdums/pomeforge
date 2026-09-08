@@ -1,4 +1,4 @@
-// Package bootstrap validates Orchard's pinned tool catalog and installs its
+// Package bootstrap validates Pomeforge's pinned tool catalog and installs its
 // Linux tools into private, per-user directories without invoking a shell.
 package bootstrap
 
@@ -26,12 +26,12 @@ var (
 	ErrUnsupportedTool     = errors.New("unsupported tool")
 	ErrUnsupportedPlatform = errors.New("unsupported operating system or architecture")
 	ErrInstallConflict     = errors.New("another install of this tool is in progress")
-	ErrActivationCollision = errors.New("activation path is not managed by Orchard")
+	ErrActivationCollision = errors.New("activation path is not managed by Pomeforge")
 	ErrInstallAbsent       = errors.New("managed tool installation is absent")
 	ErrInstallInvalid      = errors.New("managed tool installation is invalid")
 )
 
-// Catalog is the complete, pinned Orchard tool catalog.
+// Catalog is the complete, pinned Pomeforge tool catalog.
 type Catalog struct {
 	SchemaVersion int    `json:"schemaVersion"`
 	VerifiedAt    string `json:"verifiedAt"`

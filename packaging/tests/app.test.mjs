@@ -8,7 +8,7 @@ const html = await readFile(new URL("../../internal/web/assets/index.html", impo
 const style = await readFile(new URL("../../internal/web/assets/style.css", import.meta.url), "utf8");
 const context = vm.createContext({ URL, URLSearchParams });
 vm.runInContext(source, context, { filename: "app.js" });
-const { createApp, readSessionToken, safeHttpsUrl } = context.OrchardWorkspace;
+const { createApp, readSessionToken, safeHttpsUrl } = context.PomeforgeWorkspace;
 
 const elementIds = [
   "connection-status", "project-select", "project-path", "app-version", "workspace-path",
@@ -16,6 +16,10 @@ const elementIds = [
   "prerequisites-view", "results-view", "work-title", "project-summary", "empty-projects",
   "work-content", "action-select", "action-description", "ipa-field", "ipa-input",
   "device-field", "device-input", "review-plan", "plan-status", "plan-panel", "plan-summary",
+  "source-bundle-field", "source-bundle-input", "output-ipa-field", "output-ipa-input",
+  "asset-catalog-field", "asset-catalog-input", "icon-source-field", "icon-source-input",
+  "identity-field", "identity-select", "app-id-field", "app-id-input", "version-id-field",
+  "version-id-input", "build-id-field", "build-id-input", "version-field", "version-input",
   "plan-blockers", "blocker-list", "plan-warnings", "warning-list", "plan-steps",
   "confirmation-field", "confirm-execution", "run-plan", "execution-status", "refresh-diagnostics",
   "tool-count", "tool-list", "capability-list", "result-list", "create-project-dialog",
@@ -27,7 +31,10 @@ const elementIds = [
   "setup-assetkit-revision-field", "setup-assetkit-revision", "setup-sdk-input-field", "setup-sdk-input",
   "setup-sdk-arch-field", "setup-sdk-arch", "review-setup-plan", "setup-plan-status", "setup-plan-panel",
   "setup-plan-title", "setup-plan-blockers", "setup-blocker-list", "setup-plan-warnings", "setup-warning-list",
-  "setup-plan-steps", "setup-confirmation-field", "confirm-setup-execution", "run-setup-plan", "setup-execution-status"
+  "setup-plan-steps", "setup-confirmation-field", "confirm-setup-execution", "run-setup-plan", "setup-execution-status",
+  "setup-identity-id-field", "setup-identity-id", "setup-identity-label-field", "setup-identity-label",
+  "setup-private-key-field", "setup-private-key", "setup-certificate-field", "setup-certificate",
+  "setup-profile-field", "setup-profile", "setup-trust-roots-field", "setup-trust-roots", "identity-list"
 ];
 
 class FakeClassList {
@@ -131,7 +138,7 @@ function apiError(message, result, status = 500) {
 function baseState(overrides = {}) {
   return {
     version: "0.1.0",
-    workspace: "/tmp/Orchard Workspace",
+    workspace: "/tmp/Pomeforge Workspace",
     projects: [{ path: "Field Notes", name: "Field Notes", bundleId: "com.example.notes" }],
     tools: [],
     capabilities: [],
@@ -484,7 +491,7 @@ test("empty workspace can plan and run a pinned tool install with structured int
     if (path === "/api/plan") return apiResponse({
       id: "setup-plan", action: "tool-install", title: "Install pinned tool", scope: "workspace",
       blockers: [], warnings: [], executable: true, requiresConfirmation: false,
-      steps: [{ kind: "internal", tool: "orchard", operation: "verified-managed-install", parameters: { tool: "asc", sha256: "abc" }, description: "Verify and install." }]
+      steps: [{ kind: "internal", tool: "pomeforge", operation: "verified-managed-install", parameters: { tool: "asc", sha256: "abc" }, description: "Verify and install." }]
     });
     return apiResponse({ id: "setup-result", action: "tool-install", scope: "workspace", status: "succeeded", exitCode: 0, output: "installed" });
   });
@@ -497,7 +504,7 @@ test("empty workspace can plan and run a pinned tool install with structured int
   assert.deepEqual(JSON.parse(requests[1].init.body), { action: "tool-install", tool: "asc" });
   assert.equal(document.getElementById("run-setup-plan").disabled, false);
   const rendered = descendants(document.getElementById("setup-plan-steps")).map((element) => element.textContent);
-  assert.ok(rendered.includes("Orchard: verified-managed-install"));
+  assert.ok(rendered.includes("Pomeforge: verified-managed-install"));
   await app.runSetupPlan();
   assert.deepEqual(JSON.parse(requests[2].init.body), { planId: "setup-plan", confirm: false });
   assert.equal(stateLoads, 2);
@@ -571,8 +578,8 @@ test("all setup input changes and failed replans invalidate prior authorization"
   });
   await app.start();
   document.getElementById("setup-action-select").value = "helper-register";
-  document.getElementById("setup-helper-select").value = "orchard-assets";
-  document.getElementById("setup-helper-path").value = "/tmp/orchard-assets";
+  document.getElementById("setup-helper-select").value = "pomeforge-assets";
+  document.getElementById("setup-helper-path").value = "/tmp/pomeforge-assets";
   await document.getElementById("setup-action-select").dispatch("change");
   await app.reviewSetupPlan();
   assert.equal(app.state.currentSetupPlan.id, "helper-plan");
@@ -583,6 +590,58 @@ test("all setup input changes and failed replans invalidate prior authorization"
   assert.equal(app.state.currentSetupPlan, null);
   assert.equal(document.getElementById("run-setup-plan").disabled, true);
   assert.equal(document.getElementById("setup-plan-status").textContent, "Helper replan failed.");
+});
+
+test("release and signing forms send typed fields and invalidate every prior plan", async () => {
+  const requests = [];
+  const actions = [
+    { id: "export", title: "Export signed IPA", scope: "project", requiresConfirmation: false },
+    { id: "signing-configure", title: "Configure identity", scope: "workspace", requiresConfirmation: false }
+  ];
+  const { app, document } = createHarness(async (path, init) => {
+    requests.push({ path, init });
+    if (path === "/api/state") return apiResponse(baseState({
+      actions,
+      identities: [{ id: "release-main", label: "Release main", status: "ready", report: { profile: { type: "app-store", trust: "verified_against_explicit_roots" } } }]
+    }));
+    return apiResponse({ id: `plan-${requests.length}`, action: "export", title: "Export", blockers: [], warnings: [], executable: true, steps: [] });
+  });
+  await app.start();
+  document.getElementById("action-select").value = "export";
+  await document.getElementById("action-select").dispatch("change");
+  document.getElementById("source-bundle-input").value = "xtool/App.app";
+  document.getElementById("output-ipa-input").value = "App.ipa";
+  document.getElementById("asset-catalog-input").value = "Assets.xcassets";
+  document.getElementById("identity-select").value = "release-main";
+  await app.reviewPlan();
+  assert.deepEqual(JSON.parse(requests[1].init.body), {
+    action: "export", project: "Field Notes", sourceBundle: "xtool/App.app",
+    outputIPA: "App.ipa", assetCatalog: "Assets.xcassets", identity: "release-main"
+  });
+  assert.equal(app.state.currentPlan.id, "plan-2");
+  document.getElementById("output-ipa-input").value = "Changed.ipa";
+  await document.getElementById("output-ipa-input").dispatch("input");
+  assert.equal(app.state.currentPlan, null);
+
+  document.getElementById("setup-action-select").value = "signing-configure";
+  await document.getElementById("setup-action-select").dispatch("change");
+  document.getElementById("setup-identity-id").value = "release-main";
+  document.getElementById("setup-identity-label").value = "Release main";
+  document.getElementById("setup-private-key").value = "/private/release.key";
+  document.getElementById("setup-certificate").value = "/private/release.pem";
+  document.getElementById("setup-profile").value = "/private/release.mobileprovision";
+  document.getElementById("setup-trust-roots").value = "/private/root-1.pem\n/private/root-2.pem";
+  await app.reviewSetupPlan();
+  assert.deepEqual(JSON.parse(requests[2].init.body), {
+    action: "signing-configure", identity: "release-main", identityLabel: "Release main",
+    privateKeyPath: "/private/release.key", certificatePath: "/private/release.pem",
+    profilePath: "/private/release.mobileprovision",
+    trustedRootPaths: ["/private/root-1.pem", "/private/root-2.pem"]
+  });
+  assert.equal(app.state.currentSetupPlan.id, "plan-3");
+  document.getElementById("setup-profile").value = "/private/changed.mobileprovision";
+  await document.getElementById("setup-profile").dispatch("input");
+  assert.equal(app.state.currentSetupPlan, null);
 });
 
 test("results are scoped to workspace and the selected project while legacy records stay explicitly unscoped", async () => {

@@ -37,7 +37,7 @@ func (r *syntheticZsignRunner) Run(_ context.Context, action Action) error {
 		return errors.New("synthetic tool failure")
 	}
 	switch tool {
-	case "orchard-assets":
+	case "pomeforge-assets":
 		wantPrefix := []string{"compile", "--catalog"}
 		if len(action.Args) != 8 || !reflect.DeepEqual(action.Args[:2], wantPrefix) || action.Args[2] == "" || action.Args[3] != "--app" || action.Args[5] != "--minimum-ios" || action.Args[7] != "--json" {
 			r.t.Fatalf("unexpected AssetKit argv: %#v", action.Args)
@@ -72,7 +72,7 @@ func (r *syntheticZsignRunner) Run(_ context.Context, action Action) error {
 		}
 		expectedAppID := r.expectedAppID
 		if expectedAppID == "" {
-			expectedAppID = "TEAM123456.com.example.Orchard"
+			expectedAppID = "TEAM123456.com.example.Pomeforge"
 		}
 		if entitlements["application-identifier"] != expectedAppID || entitlements["get-task-allow"] != false {
 			r.t.Fatalf("unexpected exact entitlements: %#v", entitlements)
@@ -128,12 +128,12 @@ func newExportFixture(t *testing.T, withCatalog bool) exportFixture {
 	if err := os.Chmod(zsign, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	assets := filepath.Join(privateDir, "orchard-assets")
+	assets := filepath.Join(privateDir, "pomeforge-assets")
 	writePrivate(t, assets, []byte("fixture"))
 	if err := os.Chmod(assets, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	req := ExportRequest{SourceBundle: source, OutputIPA: filepath.Join(outputDir, "Orchard.ipa"), IdentityConfigPath: identity.config, ZsignExecutable: zsign, MinimumIOS: "17.0", ExpectedBundleID: "com.example.Orchard", ExpectedVersion: "1.2.3", ExpectedBuild: "42", CurrentTime: f.now}
+	req := ExportRequest{SourceBundle: source, OutputIPA: filepath.Join(outputDir, "Pomeforge.ipa"), IdentityConfigPath: identity.config, ZsignExecutable: zsign, MinimumIOS: "17.0", ExpectedBundleID: "com.example.Pomeforge", ExpectedVersion: "1.2.3", ExpectedBuild: "42", CurrentTime: f.now}
 	catalog := ""
 	if withCatalog {
 		catalog = writeIconCatalog(t, projectDir)
@@ -185,7 +185,7 @@ func TestExportStagesAssetsSignsInspectsAndPreservesSource(t *testing.T) {
 	if after := treeDigest(t, fixture.source); after != before {
 		t.Fatalf("source bundle changed: before=%s after=%s", before, after)
 	}
-	if len(runner.actions) != 2 || filepath.Base(runner.actions[0].Executable) != "orchard-assets" || filepath.Base(runner.actions[1].Executable) != "zsign" {
+	if len(runner.actions) != 2 || filepath.Base(runner.actions[0].Executable) != "pomeforge-assets" || filepath.Base(runner.actions[1].Executable) != "zsign" {
 		t.Fatalf("unexpected action order: %+v", runner.actions)
 	}
 	archive, err := zip.OpenReader(fixture.output)
@@ -200,10 +200,10 @@ func TestExportStagesAssetsSignsInspectsAndPreservesSource(t *testing.T) {
 		if strings.HasSuffix(entry.Name, "/") && entry.Mode().Perm() != 0o755 {
 			t.Fatalf("directory %q mode=%04o", entry.Name, entry.Mode().Perm())
 		}
-		if entry.Name == "Payload/Orchard.app/Orchard" && entry.Mode().Perm() != 0o755 {
+		if entry.Name == "Payload/Pomeforge.app/Pomeforge" && entry.Mode().Perm() != 0o755 {
 			t.Fatalf("main executable mode=%04o", entry.Mode().Perm())
 		}
-		if !strings.HasSuffix(entry.Name, "/") && entry.Name != "Payload/Orchard.app/Orchard" && entry.Mode().Perm() != 0o644 {
+		if !strings.HasSuffix(entry.Name, "/") && entry.Name != "Payload/Pomeforge.app/Pomeforge" && entry.Mode().Perm() != 0o644 {
 			t.Fatalf("resource %q mode=%04o", entry.Name, entry.Mode().Perm())
 		}
 	}
@@ -255,9 +255,9 @@ func TestCanonicalizeIPARejectsArchivePathKindConflict(t *testing.T) {
 	destination := filepath.Join(dir, "canonical.ipa")
 	writeIPA(t, source, []zipEntry{
 		{name: "Payload", data: []byte("file"), mode: 0o600},
-		{name: "Payload/Orchard.app/Info.plist", data: fixtureInfo(t, false), mode: 0o600},
+		{name: "Payload/Pomeforge.app/Info.plist", data: fixtureInfo(t, false), mode: 0o600},
 	})
-	err := canonicalizeIPA(context.Background(), source, destination, "Payload/Orchard.app", "Orchard", DefaultLimits())
+	err := canonicalizeIPA(context.Background(), source, destination, "Payload/Pomeforge.app", "Pomeforge", DefaultLimits())
 	if err == nil || !strings.Contains(err.Error(), "archive_file_ancestor") {
 		t.Fatalf("canonicalization error=%v", err)
 	}
@@ -356,7 +356,7 @@ func TestExportUsesImmutableIdentitySnapshots(t *testing.T) {
 
 func TestExportRejectsConflictingRequiredEntitlements(t *testing.T) {
 	for _, entitlement := range []map[string]any{
-		{"application-identifier": "WRONG.com.example.Orchard"},
+		{"application-identifier": "WRONG.com.example.Pomeforge"},
 		{"com.apple.developer.team-identifier": "WRONGTEAM"},
 		{"get-task-allow": true},
 	} {
@@ -376,7 +376,7 @@ func TestExportPreservesDistinctApplicationIdentifierPrefix(t *testing.T) {
 	fixture := newExportFixture(t, false)
 	prefix := "LEGACY1234"
 	writePrivate(t, fixture.profile, fixture.crypto.profile(t, profileOptions{prefix: prefix}))
-	runner := &syntheticZsignRunner{t: t, expectedAppID: prefix + ".com.example.Orchard", expectedKeychain: prefix + ".com.example.Orchard"}
+	runner := &syntheticZsignRunner{t: t, expectedAppID: prefix + ".com.example.Pomeforge", expectedKeychain: prefix + ".com.example.Pomeforge"}
 	result, err := Export(context.Background(), fixture.request, runner)
 	if err != nil || !result.Valid() {
 		t.Fatalf("distinct-prefix export failed: result=%+v err=%v", result, err)

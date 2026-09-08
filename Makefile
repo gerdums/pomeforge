@@ -6,8 +6,8 @@ HOSTS ?= linux
 all: check
 
 ensure-linux:
-	@test "$(HOSTS)" = "linux" || { echo "Orchard build workflows support only HOSTS=linux" >&2; exit 2; }
-	@test "$$(uname -s)" = "Linux" || { echo "Orchard build workflows must run on Linux" >&2; exit 2; }
+	@test "$(HOSTS)" = "linux" || { echo "Pomeforge build workflows support only HOSTS=linux" >&2; exit 2; }
+	@test "$$(uname -s)" = "Linux" || { echo "Pomeforge build workflows must run on Linux" >&2; exit 2; }
 
 test: ensure-linux
 	GOOS=linux $(GO) test ./...
@@ -17,11 +17,11 @@ vet: ensure-linux
 
 build: ensure-linux
 	mkdir -p bin
-	CGO_ENABLED=0 GOOS=linux $(GO) build -trimpath -o bin/orchard ./cmd/orchard
+	CGO_ENABLED=0 GOOS=linux $(GO) build -trimpath -o bin/pomeforge ./cmd/pomeforge
 
 cross-check: ensure-linux
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -o /tmp/orchard-linux-amd64 ./cmd/orchard
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -o /tmp/orchard-linux-arm64 ./cmd/orchard
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -o /tmp/pomeforge-linux-amd64 ./cmd/pomeforge
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -o /tmp/pomeforge-linux-arm64 ./cmd/pomeforge
 
 check: test vet build cross-check
 

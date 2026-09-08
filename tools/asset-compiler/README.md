@@ -1,6 +1,6 @@
-# Orchard Asset Compiler
+# Pomeforge Asset Compiler
 
-`orchard-assets` is Orchard's small Linux bridge to
+`pomeforge-assets` is Pomeforge's small Linux bridge to
 [AssetKit](https://github.com/xtool-org/AssetKit). The package pins AssetKit to
 revision `e763558b55fcbb5a443b1d7b2c6f0972d8bd14f7`; it does not duplicate the
 compiler or bundle any Apple SDK files.
@@ -18,7 +18,7 @@ swift test --package-path tools/asset-compiler
 ## Usage
 
 ```sh
-orchard-assets compile \
+pomeforge-assets compile \
   --catalog /path/to/Assets.xcassets \
   --app /path/to/Unsigned.app \
   --minimum-ios 17.0 \

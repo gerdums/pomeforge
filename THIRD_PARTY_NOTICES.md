@@ -1,6 +1,6 @@
 # Third-party components
 
-Orchard reuses the following components. Retain this notice and the linked license texts when distributing binaries built from them.
+Pomeforge reuses the following components. Retain this notice and the linked license texts when distributing binaries built from them.
 
 | Component | Pin | Use | License text |
 | --- | --- | --- | --- |
@@ -14,6 +14,6 @@ Orchard reuses the following components. Retain this notice and the linked licen
 
 `go.sum` and the asset compiler's `Package.resolved` record dependency integrity. Go and Swift toolchains carry their own runtime and standard-library notices.
 
-xtool, ASC CLI, and zsign remain separate upstream executables, downloaded on explicit request from the releases pinned in [toolchains.lock.json](toolchains.lock.json). Their repositories and releases contain the applicable notices and source. Device services and optional device tools also remain separate programs. Orchard does not bundle an Apple SDK; the operator supplies it under their applicable terms.
+xtool, ASC CLI, and zsign remain separate upstream executables, downloaded on explicit request from the releases pinned in [toolchains.lock.json](toolchains.lock.json). Their repositories and releases contain the applicable notices and source. Device services and optional device tools also remain separate programs. Pomeforge does not bundle an Apple SDK; the operator supplies it under their applicable terms.
 
-The Linux container packages unxip as a separate, unmodified executable. Distributions that include that binary must also include its pinned corresponding source archive, these license texts, and the reproducible Linux build instructions. The container recipe retains that source separately from the Orchard application.
+The Linux container packages unxip as a separate, unmodified executable. Distributions that include that binary must also include its pinned corresponding source archive, these license texts, and the reproducible Linux build instructions. The container recipe retains that source separately from the Pomeforge application.

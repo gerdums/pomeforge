@@ -20,9 +20,9 @@ import (
 // upstream artifacts. Digests, sizes, versions, and formats still come only
 // from the repository catalog; a local TLS server replaces only transport.
 func TestRealPinnedInstallers(t *testing.T) {
-	artifactDirectory := os.Getenv("ORCHARD_REAL_INSTALL_ARTIFACT_DIR")
+	artifactDirectory := os.Getenv("POMEFORGE_REAL_INSTALL_ARTIFACT_DIR")
 	if artifactDirectory == "" {
-		t.Skip("set ORCHARD_REAL_INSTALL_ARTIFACT_DIR to run pinned installer integration")
+		t.Skip("set POMEFORGE_REAL_INSTALL_ARTIFACT_DIR to run pinned installer integration")
 	}
 	file, err := os.Open(filepath.Join("..", "..", "toolchains.lock.json"))
 	if err != nil {

@@ -220,7 +220,7 @@ func TestInstallRejectsToolAndVersionSymlinksWithoutTouchingTargets(t *testing.T
 }
 
 func TestInstallSupportsSpecialCharactersInManagedPaths(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "orchard paths with spaces & %")
+	root := filepath.Join(t.TempDir(), "pomeforge paths with spaces & %")
 	paths := Paths{ToolsDir: filepath.Join(root, "tools"), DownloadsDir: filepath.Join(root, "downloads"), BinDir: filepath.Join(root, "bin")}
 	payload := []byte("asc")
 	server := serveTLS(t, payload)

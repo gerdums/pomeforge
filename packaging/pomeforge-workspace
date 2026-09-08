@@ -1,0 +1,26 @@
+#!/bin/sh
+set -eu
+
+case ${XDG_DATA_HOME:-} in
+  /*) pomeforge_data_home=$XDG_DATA_HOME ;;
+  *) pomeforge_data_home=$HOME/.local/share ;;
+esac
+
+pomeforge_binary=$pomeforge_data_home/pomeforge/bin/pomeforge
+if [ ! -x "$pomeforge_binary" ]; then
+  printf '%s\n' "Pomeforge is not installed at: $pomeforge_binary" >&2
+  printf '%s\n' "Run the user-local Pomeforge installer again with a prebuilt binary." >&2
+  exit 1
+fi
+
+if [ -n "${POMEFORGE_WORKSPACE:-}" ]; then
+  pomeforge_workspace=$POMEFORGE_WORKSPACE
+else
+  pomeforge_workspace=$pomeforge_data_home/pomeforge/workspace
+fi
+
+mkdir -p -- "$pomeforge_workspace"
+
+# Pomeforge opens the authenticated URL only after binding the loopback listener.
+# Its token-bearing output is deliberately left untouched.
+exec "$pomeforge_binary" app --open --workspace "$pomeforge_workspace" --listen 127.0.0.1:0

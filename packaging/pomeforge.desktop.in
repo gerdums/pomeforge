@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Pomeforge
+GenericName=iOS Development Workspace
+Comment=Open the local Pomeforge development workspace
+Exec=@POMEFORGE_LAUNCHER@
+Icon=pomeforge
+Terminal=false
+Categories=Development;IDE;
+StartupNotify=true
+Keywords=Swift;iOS;iPhone;iPad;xtool;

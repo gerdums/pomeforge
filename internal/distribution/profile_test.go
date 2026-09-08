@@ -39,7 +39,7 @@ func TestTrustedProfileAndIdentity(t *testing.T) {
 		t.Fatalf("identity mismatch: %+v", result.Value)
 	}
 	p := result.Value.Profile
-	if !p.SignatureValid || p.Trust != TrustVerified || p.Type != ProfileAppStore || p.BundleIdentifier != "com.example.Orchard" || p.TeamID != "TEAM123456" {
+	if !p.SignatureValid || p.Trust != TrustVerified || p.Type != ProfileAppStore || p.BundleIdentifier != "com.example.Pomeforge" || p.TeamID != "TEAM123456" {
 		t.Fatalf("unexpected profile: %+v", p)
 	}
 	if p.HasProvisionedDevices {
@@ -62,7 +62,7 @@ func TestIdentityKeepsApplicationPrefixSeparateFromTeam(t *testing.T) {
 		t.Fatalf("legacy App ID prefix rejected: %+v", result.Problems)
 	}
 	profile := result.Value.Profile
-	if profile.ApplicationIdentifierPrefix != "LEGACY1234" || profile.TeamID != "TEAM123456" || profile.BundleIdentifier != "com.example.Orchard" {
+	if profile.ApplicationIdentifierPrefix != "LEGACY1234" || profile.TeamID != "TEAM123456" || profile.BundleIdentifier != "com.example.Pomeforge" {
 		t.Fatalf("prefix/team parsing is incorrect: %+v", profile)
 	}
 }

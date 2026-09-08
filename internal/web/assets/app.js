@@ -1,8 +1,13 @@
 (function (root) {
   "use strict";
 
-  const IPA_ACTIONS = new Set(["install", "validate", "upload", "submit"]);
+  const IPA_ACTIONS = new Set(["install", "upload", "ipa-inspect"]);
   const DEVICE_ACTIONS = new Set(["install", "launch"]);
+  const IDENTITY_ACTIONS = new Set(["export", "upload", "ipa-inspect"]);
+  const SOURCE_BUNDLE_ACTIONS = new Set(["release-build", "export"]);
+  const APP_ID_ACTIONS = new Set(["upload", "validate", "submit"]);
+  const VERSION_ID_ACTIONS = new Set(["validate", "submit"]);
+  const BUILD_ID_ACTIONS = new Set(["store-status", "submit"]);
 
   function readSessionToken(locationObject, historyObject) {
     const fragment = String(locationObject && locationObject.hash ? locationObject.hash : "");
@@ -39,6 +44,10 @@
       "prerequisites-view", "results-view", "work-title", "project-summary", "empty-projects",
       "work-content", "action-select", "action-description", "ipa-field", "ipa-input",
       "device-field", "device-input", "review-plan", "plan-status", "plan-panel", "plan-summary",
+      "source-bundle-field", "source-bundle-input", "output-ipa-field", "output-ipa-input",
+      "asset-catalog-field", "asset-catalog-input", "icon-source-field", "icon-source-input",
+      "identity-field", "identity-select", "app-id-field", "app-id-input", "version-id-field",
+      "version-id-input", "build-id-field", "build-id-input", "version-field", "version-input",
       "plan-blockers", "blocker-list", "plan-warnings", "warning-list", "plan-steps",
       "confirmation-field", "confirm-execution", "run-plan", "execution-status", "refresh-diagnostics",
       "tool-count", "tool-list", "capability-list", "result-list", "create-project-dialog",
@@ -51,7 +60,10 @@
       "setup-sdk-arch", "review-setup-plan", "setup-plan-status", "setup-plan-panel", "setup-plan-title",
       "setup-plan-blockers", "setup-blocker-list", "setup-plan-warnings", "setup-warning-list",
       "setup-plan-steps", "setup-confirmation-field", "confirm-setup-execution", "run-setup-plan",
-      "setup-execution-status"
+      "setup-execution-status", "setup-identity-id-field", "setup-identity-id",
+      "setup-identity-label-field", "setup-identity-label", "setup-private-key-field",
+      "setup-private-key", "setup-certificate-field", "setup-certificate", "setup-profile-field",
+      "setup-profile", "setup-trust-roots-field", "setup-trust-roots", "identity-list"
     ];
 
     ids.forEach((id) => { elements[id] = doc.getElementById(id); });
@@ -112,8 +124,8 @@
       state.disconnected = true;
       setConnection("Connection unavailable", "offline");
       showAlert(
-        "Orchard connection unavailable",
-        `${message} Retry this connection, or close this tab and reopen Orchard from the desktop launcher or with “orchard app --open”.`,
+        "Pomeforge connection unavailable",
+        `${message} Retry this connection, or close this tab and reopen Pomeforge from the desktop launcher or with “pomeforge app --open”.`,
         Boolean(token)
       );
       updateControls();
@@ -138,22 +150,22 @@
           body: request.body === undefined ? undefined : JSON.stringify(request.body)
         });
       } catch (_error) {
-        connectionFailure("The local Orchard process did not respond.");
-        throw new Error("The local Orchard process did not respond.");
+        connectionFailure("The local Pomeforge process did not respond.");
+        throw new Error("The local Pomeforge process did not respond.");
       }
 
       let payload;
       try {
         payload = await response.json();
       } catch (_error) {
-        showAlert("Unexpected response", "Orchard returned a response that was not valid JSON.", false);
-        throw new Error("Orchard returned invalid JSON.");
+        showAlert("Unexpected response", "Pomeforge returned a response that was not valid JSON.", false);
+        throw new Error("Pomeforge returned invalid JSON.");
       }
 
       if (!response.ok || !payload || payload.ok !== true) {
         const apiMessage = payload && payload.error && typeof payload.error.message === "string"
           ? payload.error.message
-          : `Orchard returned HTTP ${response.status}.`;
+          : `Pomeforge returned HTTP ${response.status}.`;
         if (response.status === 401 || response.status === 403) {
           connectionFailure(`${apiMessage} The session may have expired.`);
         } else {
@@ -185,6 +197,10 @@
       elements["action-select"].disabled = unavailable || !hasActions || !state.selectedProject;
       elements["ipa-input"].disabled = unavailable;
       elements["device-input"].disabled = unavailable;
+      ["source-bundle-input", "output-ipa-input", "asset-catalog-input", "icon-source-input",
+        "identity-select", "app-id-input", "version-id-input", "build-id-input", "version-input"].forEach((id) => {
+        elements[id].disabled = unavailable;
+      });
       elements["review-plan"].disabled = unavailable || !state.selectedProject || !state.selectedAction;
       elements["run-plan"].disabled = unavailable || !plan || plan.executable !== true || blockers.length > 0 || !confirmationSatisfied;
       elements["refresh-diagnostics"].disabled = unavailable;
@@ -197,6 +213,8 @@
       elements["setup-assetkit-revision"].disabled = unavailable;
       elements["setup-sdk-input"].disabled = unavailable;
       elements["setup-sdk-arch"].disabled = unavailable;
+      ["setup-identity-id", "setup-identity-label", "setup-private-key", "setup-certificate",
+        "setup-profile", "setup-trust-roots"].forEach((id) => { elements[id].disabled = unavailable; });
       elements["review-setup-plan"].disabled = unavailable || !state.selectedSetupAction || !setupInputsComplete();
       const setupPlan = state.currentSetupPlan;
       const setupBlockers = setupPlan ? normalizedList(setupPlan.blockers) : [];
@@ -274,9 +292,18 @@
       const action = selectedActionRecord();
       elements["action-description"].textContent = action
         ? textValue(action.description, "No operation description was provided.")
-        : "Available operations come from Orchard’s current capabilities.";
+        : "Available operations come from Pomeforge’s current capabilities.";
       elements["ipa-field"].hidden = !IPA_ACTIONS.has(state.selectedAction);
       elements["device-field"].hidden = !DEVICE_ACTIONS.has(state.selectedAction);
+      elements["source-bundle-field"].hidden = !SOURCE_BUNDLE_ACTIONS.has(state.selectedAction);
+      elements["output-ipa-field"].hidden = state.selectedAction !== "export";
+      elements["asset-catalog-field"].hidden = state.selectedAction !== "export";
+      elements["icon-source-field"].hidden = state.selectedAction !== "icons";
+      elements["identity-field"].hidden = !IDENTITY_ACTIONS.has(state.selectedAction);
+      elements["app-id-field"].hidden = !APP_ID_ACTIONS.has(state.selectedAction);
+      elements["version-id-field"].hidden = !VERSION_ID_ACTIONS.has(state.selectedAction);
+      elements["build-id-field"].hidden = !BUILD_ID_ACTIONS.has(state.selectedAction);
+      elements["version-field"].hidden = state.selectedAction !== "validate";
     }
 
     function renderActions() {
@@ -299,12 +326,51 @@
       renderActionFields();
     }
 
+    function renderIdentities() {
+      const identities = normalizedList(state.server.identities);
+      elements["identity-select"].replaceChildren();
+      const prompt = createElement("option", "", identities.length ? "Choose an identity" : "No identities configured");
+      prompt.value = "";
+      elements["identity-select"].append(prompt);
+      elements["identity-list"].replaceChildren();
+      if (!identities.length) {
+        elements["identity-list"].append(createElement("p", "empty-row", "Configure a named identity using the setup operation below."));
+        return;
+      }
+      identities.forEach((identity) => {
+        const option = createElement("option", "", textValue(identity.label, identity.id));
+        option.value = identity.id;
+        elements["identity-select"].append(option);
+        const row = createElement("article", "diagnostic-row");
+        const name = createElement("div", "diagnostic-name");
+        name.append(createElement("h3", "", textValue(identity.label, identity.id)));
+        name.append(createElement("p", "", `Identity ${textValue(identity.id, "unknown")}`));
+        name.append(createElement("span", `status-badge ${statusClass(identity.status)}`, textValue(identity.status, "unknown")));
+        const report = identity.report || {};
+        const certificate = report.certificate || {};
+        const profile = report.profile || {};
+        const detail = identity.error || [
+          `certificate ${textValue(certificate.subjectCN, "subject unavailable")}`,
+          `issuer ${textValue(certificate.issuerCN, "unavailable")}`,
+          `fingerprint ${textValue(certificate.sha256Fingerprint, "unavailable")}`,
+          `profile ${textValue(profile.name, "name unavailable")} (${textValue(profile.type, "type unavailable")})`,
+          `bundle ${textValue(profile.bundleIdentifier, "unavailable")}`,
+          `expires ${displayTimestamp(profile.expirationDate)}`,
+          `trust ${textValue(profile.trust, "not reported")}`
+        ].join(" · ");
+        row.append(name, createElement("p", "diagnostic-detail", detail));
+        elements["identity-list"].append(row);
+      });
+    }
+
     function setupInputsComplete() {
       switch (state.selectedSetupAction) {
       case "tool-install": return Boolean(elements["setup-tool-select"].value);
       case "helper-register": return Boolean(elements["setup-helper-select"].value && elements["setup-helper-path"].value.trim());
       case "sdk-status": return true;
       case "sdk-import": return Boolean(elements["setup-sdk-input"].value.trim() && elements["setup-sdk-arch"].value);
+      case "signing-configure": return Boolean(elements["setup-identity-id"].value.trim() && elements["setup-identity-label"].value.trim() && elements["setup-private-key"].value.trim() && elements["setup-certificate"].value.trim() && elements["setup-profile"].value.trim());
+      case "signing-inspect": return Boolean(elements["setup-identity-id"].value.trim());
       default: return false;
       }
     }
@@ -332,9 +398,17 @@
       elements["setup-helper-field"].hidden = !helper;
       elements["setup-helper-path-field"].hidden = !helper;
       elements["setup-source-revision-field"].hidden = !helper;
-      elements["setup-assetkit-revision-field"].hidden = !helper || elements["setup-helper-select"].value !== "orchard-assets";
+      elements["setup-assetkit-revision-field"].hidden = !helper || elements["setup-helper-select"].value !== "pomeforge-assets";
       elements["setup-sdk-input-field"].hidden = action !== "sdk-import";
       elements["setup-sdk-arch-field"].hidden = action !== "sdk-import";
+      const signing = action === "signing-configure" || action === "signing-inspect";
+      const configuring = action === "signing-configure";
+      elements["setup-identity-id-field"].hidden = !signing;
+      elements["setup-identity-label-field"].hidden = !configuring;
+      elements["setup-private-key-field"].hidden = !configuring;
+      elements["setup-certificate-field"].hidden = !configuring;
+      elements["setup-profile-field"].hidden = !configuring;
+      elements["setup-trust-roots-field"].hidden = !configuring;
     }
 
     function invalidateSetupPlan(message) {
@@ -458,11 +532,12 @@
     }
 
     function renderState(preferredProject) {
-      elements["app-version"].textContent = state.server.version ? `Orchard ${state.server.version}` : "Version unavailable";
+      elements["app-version"].textContent = state.server.version ? `Pomeforge ${state.server.version}` : "Version unavailable";
       elements["workspace-path"].textContent = textValue(state.server.workspace, "Local workspace");
       renderProjects(preferredProject);
       renderActions();
 	  renderSetupActions();
+      renderIdentities();
       renderDiagnostics();
       state.results = mergeResultRecords(state.sessionResults, state.server.history);
       renderResults();
@@ -533,17 +608,33 @@
 
           const scroll = createElement("div", "command-scroll");
           const command = createElement("code", "argv");
-          command.setAttribute("aria-label", "Executable followed by individually bounded arguments");
-          command.append(createElement("span", "argv-executable", textValue(step.executable, "Executable unavailable")));
-          normalizedList(step.args).forEach((argument) => {
-            command.append(createElement("span", "argv-boundary", "·"));
-            command.append(createElement("span", "argv-argument", String(argument)));
-          });
-          scroll.append(command, createElement("p", "shell-note", "Argument boxes show process boundaries; this is display only, not shell syntax."));
+          if (step.kind === "internal") {
+            command.setAttribute("aria-label", "Structured Pomeforge internal operation");
+            command.append(createElement("span", "argv-executable", `Pomeforge: ${textValue(step.operation, "internal operation")}`));
+            Object.keys(step.parameters || {}).sort().forEach((key) => {
+              command.append(createElement("span", "argv-boundary", "·"));
+              command.append(createElement("span", "argv-argument", `${key}=${step.parameters[key]}`));
+            });
+            scroll.append(command, createElement("p", "shell-note", "This is a structured internal operation, not a fabricated shell command."));
+          } else {
+            command.setAttribute("aria-label", "Executable followed by individually bounded arguments");
+            command.append(createElement("span", "argv-executable", textValue(step.executable, "Executable unavailable")));
+            normalizedList(step.args).forEach((argument) => {
+              command.append(createElement("span", "argv-boundary", "·"));
+              command.append(createElement("span", "argv-argument", String(argument)));
+            });
+            scroll.append(command, createElement("p", "shell-note", "Argument boxes show process boundaries; this is display only, not shell syntax."));
+          }
           article.append(scroll);
           elements["plan-steps"].append(article);
         });
       }
+
+      ["sdkBinding", "identityInspection", "ipaInspection", "distributionExport"].forEach((key) => {
+        if (plan[key] && typeof plan[key] === "object") {
+          elements["plan-steps"].append(createElement("pre", "result-metadata", JSON.stringify(plan[key], null, 2)));
+        }
+      });
 
       elements["confirmation-field"].hidden = plan.requiresConfirmation !== true;
       elements["confirm-execution"].checked = false;
@@ -580,8 +671,8 @@
         const scroll = createElement("div", "command-scroll");
         const command = createElement("code", "argv");
         if (step.kind === "internal") {
-          command.setAttribute("aria-label", "Structured Orchard internal operation");
-          command.append(createElement("span", "argv-executable", `Orchard: ${textValue(step.operation, "internal operation")}`));
+          command.setAttribute("aria-label", "Structured Pomeforge internal operation");
+          command.append(createElement("span", "argv-executable", `Pomeforge: ${textValue(step.operation, "internal operation")}`));
           Object.keys(step.parameters || {}).sort().forEach((key) => {
             command.append(createElement("span", "argv-boundary", "·"));
             command.append(createElement("span", "argv-argument", `${key}=${step.parameters[key]}`));
@@ -614,11 +705,22 @@
         body.helper = elements["setup-helper-select"].value;
         body.executablePath = elements["setup-helper-path"].value.trim();
         if (elements["setup-source-revision"].value.trim()) body.sourceRevision = elements["setup-source-revision"].value.trim();
-		if (body.helper === "orchard-assets" && elements["setup-assetkit-revision"].value.trim()) body.assetKitRevision = elements["setup-assetkit-revision"].value.trim();
+		if (body.helper === "pomeforge-assets" && elements["setup-assetkit-revision"].value.trim()) body.assetKitRevision = elements["setup-assetkit-revision"].value.trim();
       }
       if (state.selectedSetupAction === "sdk-import") {
         body.inputPath = elements["setup-sdk-input"].value.trim();
         body.arch = elements["setup-sdk-arch"].value;
+      }
+      if (state.selectedSetupAction === "signing-configure" || state.selectedSetupAction === "signing-inspect") {
+        body.identity = elements["setup-identity-id"].value.trim();
+      }
+      if (state.selectedSetupAction === "signing-configure") {
+        body.identityLabel = elements["setup-identity-label"].value.trim();
+        body.privateKeyPath = elements["setup-private-key"].value.trim();
+        body.certificatePath = elements["setup-certificate"].value.trim();
+        body.profilePath = elements["setup-profile"].value.trim();
+        const roots = elements["setup-trust-roots"].value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+        if (roots.length) body.trustedRootPaths = roots;
       }
       return body;
     }
@@ -691,6 +793,20 @@
       const body = { action: state.selectedAction, project: state.selectedProject };
       if (!elements["ipa-field"].hidden && elements["ipa-input"].value.trim()) body.ipa = elements["ipa-input"].value.trim();
       if (!elements["device-field"].hidden && elements["device-input"].value.trim()) body.device = elements["device-input"].value.trim();
+      const fields = [
+        ["source-bundle-field", "source-bundle-input", "sourceBundle"],
+        ["output-ipa-field", "output-ipa-input", "outputIPA"],
+        ["asset-catalog-field", "asset-catalog-input", "assetCatalog"],
+        ["icon-source-field", "icon-source-input", "iconSource"],
+        ["identity-field", "identity-select", "identity"],
+        ["app-id-field", "app-id-input", "appId"],
+        ["version-id-field", "version-id-input", "versionId"],
+        ["build-id-field", "build-id-input", "buildId"],
+        ["version-field", "version-input", "version"]
+      ];
+      fields.forEach(([container, input, key]) => {
+        if (!elements[container].hidden && elements[input].value.trim()) body[key] = elements[input].value.trim();
+      });
       return body;
     }
 
@@ -828,8 +944,11 @@
         invalidatePlan(state.selectedAction ? "Review this operation before running it." : "Choose an operation to continue.");
       });
 
-      [elements["ipa-input"], elements["device-input"]].forEach((input) => {
+      ["ipa-input", "device-input", "source-bundle-input", "output-ipa-input", "asset-catalog-input",
+        "icon-source-input", "identity-select", "app-id-input", "version-id-input", "build-id-input",
+        "version-input"].map((id) => elements[id]).forEach((input) => {
         input.addEventListener("input", () => invalidatePlan("Operation inputs changed. Review a new plan before running."));
+        input.addEventListener("change", () => invalidatePlan("Operation inputs changed. Review a new plan before running."));
       });
 
       elements["confirm-execution"].addEventListener("change", updateControls);
@@ -844,7 +963,8 @@
         renderSetupFields();
         invalidateSetupPlan("Setup inputs changed. Review a new plan before running.");
       });
-      ["setup-tool-select", "setup-helper-path", "setup-source-revision", "setup-assetkit-revision", "setup-sdk-input", "setup-sdk-arch"].forEach((id) => {
+      ["setup-tool-select", "setup-helper-path", "setup-source-revision", "setup-assetkit-revision", "setup-sdk-input", "setup-sdk-arch",
+        "setup-identity-id", "setup-identity-label", "setup-private-key", "setup-certificate", "setup-profile", "setup-trust-roots"].forEach((id) => {
         elements[id].addEventListener("input", () => invalidateSetupPlan("Setup inputs changed. Review a new plan before running."));
         elements[id].addEventListener("change", () => invalidateSetupPlan("Setup inputs changed. Review a new plan before running."));
       });
@@ -882,7 +1002,7 @@
       bindEvents();
       if (!token) {
         connectionFailure("This page does not have a session token.");
-        elements["plan-status"].textContent = "Reopen Orchard to start an authenticated session.";
+        elements["plan-status"].textContent = "Reopen Pomeforge to start an authenticated session.";
         return;
       }
       await loadState();
@@ -904,13 +1024,13 @@
   }
 
   const exported = Object.freeze({ createApp, readSessionToken, safeHttpsUrl });
-  root.OrchardWorkspace = exported;
+  root.PomeforgeWorkspace = exported;
 
   if (root.document && root.location && root.history) {
     const token = readSessionToken(root.location, root.history);
     const boot = () => {
       const app = createApp({ document: root.document, fetch: root.fetch.bind(root), token });
-      root.OrchardWorkspaceApp = app;
+      root.PomeforgeWorkspaceApp = app;
       app.start();
     };
     if (root.document.readyState === "loading") root.document.addEventListener("DOMContentLoaded", boot, { once: true });

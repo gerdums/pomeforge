@@ -162,7 +162,7 @@ func resolveAssetCatalog(ctx context.Context, req ExportRequest, limits Limits) 
 	}
 	if catalog != "" {
 		if req.AssetCompilerExecutable == "" {
-			problems = append(problems, problem("missing_asset_compiler", "assetCompilerExecutable", "orchard-assets executable is required when a catalog is present"))
+			problems = append(problems, problem("missing_asset_compiler", "assetCompilerExecutable", "pomeforge-assets executable is required when a catalog is present"))
 		} else if err := validateExecutable(req.AssetCompilerExecutable, "assetCompilerExecutable"); err != nil {
 			problems = append(problems, problem("invalid_asset_compiler", "assetCompilerExecutable", err.Error()))
 		}
@@ -632,7 +632,7 @@ func Export(ctx context.Context, req ExportRequest, runner Runner) (Result[Expor
 		return result, fmt.Errorf("open output parent safely: %w", err)
 	}
 	_ = parent.Close()
-	stagingRoot, err := os.MkdirTemp(filepath.Dir(req.OutputIPA), ".orchard-export-")
+	stagingRoot, err := os.MkdirTemp(filepath.Dir(req.OutputIPA), ".pomeforge-export-")
 	if err != nil {
 		return result, err
 	}

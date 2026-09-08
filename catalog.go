@@ -1,4 +1,4 @@
-// Package toolcatalog embeds Orchard's reviewed tool lock once and exposes a
+// Package toolcatalog embeds Pomeforge's reviewed tool lock once and exposes a
 // validated bootstrap catalog to the CLI and core integration.
 package toolcatalog
 
@@ -6,7 +6,7 @@ import (
 	"bytes"
 	_ "embed"
 
-	"orchard.local/orchard/internal/bootstrap"
+	"pomeforge.local/pomeforge/internal/bootstrap"
 )
 
 //go:embed toolchains.lock.json

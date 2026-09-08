@@ -26,9 +26,9 @@ func DefaultPaths() (Paths, error) {
 	dataHome := xdgHome("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
 	cacheHome := xdgHome("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
 	paths := Paths{
-		ToolsDir:     filepath.Join(dataHome, "orchard", "tools"),
-		DownloadsDir: filepath.Join(cacheHome, "orchard", "downloads"),
-		BinDir:       filepath.Join(dataHome, "orchard", "bin"),
+		ToolsDir:     filepath.Join(dataHome, "pomeforge", "tools"),
+		DownloadsDir: filepath.Join(cacheHome, "pomeforge", "downloads"),
+		BinDir:       filepath.Join(dataHome, "pomeforge", "bin"),
 	}
 	if err := validatePaths(paths); err != nil {
 		return Paths{}, err

@@ -1,6 +1,6 @@
-# Working on Orchard
+# Working on Pomeforge
 
-Orchard provides a Linux CLI and graphical workspace for iPhone and iPad development. Read `docs/architecture.md`, `docs/implementation-plan.md`, and `docs/toolchain-research.md` before changing the supported workflow.
+Pomeforge provides a Linux CLI and graphical workspace for iPhone and iPad development. Read `docs/architecture.md`, `docs/implementation-plan.md`, and `docs/toolchain-research.md` before changing the supported workflow.
 
 ## Product rules
 
@@ -14,9 +14,9 @@ Orchard provides a Linux CLI and graphical workspace for iPhone and iPad develop
 
 ## Structure and checks
 
-The Go core and CLI live under `internal/` and `cmd/orchard`. The web UI is embedded from `internal/web/assets`. The Swift AssetKit bridge lives under `tools/asset-compiler`. Dependency releases and SHA-256 digests are pinned in `toolchains.lock.json`.
+The Go core and CLI live under `internal/` and `cmd/pomeforge`. The web UI is embedded from `internal/web/assets`. The Swift AssetKit bridge lives under `tools/asset-compiler`. Dependency releases and SHA-256 digests are pinned in `toolchains.lock.json`.
 
-Run `go test ./...`, `go vet ./...`, and `go build ./cmd/orchard` for Go changes. Run the asset compiler's Swift tests for asset changes. Exercise the real CLI and graphical app after changing their contract. Use isolated temporary projects, and retain the exact commit and test result with runtime evidence.
+Run `go test ./...`, `go vet ./...`, and `go build ./cmd/pomeforge` for Go changes. Run the asset compiler's Swift tests for asset changes. Exercise the real CLI and graphical app after changing their contract. Use isolated temporary projects, and retain the exact commit and test result with runtime evidence.
 
 ## Execution safety
 

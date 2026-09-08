@@ -1,6 +1,6 @@
-# Orchard architecture
+# Pomeforge architecture
 
-Orchard is a Linux workspace for developing Swift iPhone and iPad apps. A person can use the graphical app or CLI. An agent uses the same CLI with JSON output. AI is optional and never required to create, build, test, or release an app.
+Pomeforge is a Linux workspace for developing Swift iPhone and iPad apps. A person can use the graphical app or CLI. An agent uses the same CLI with JSON output. AI is optional and never required to create, build, test, or release an app.
 
 The first supported project format is xtool's Swift Package Manager application. Arbitrary Xcode projects, React Native, Flutter, simulator execution, Interface Builder, and Xcode-specific plugins are outside this initial compatibility claim. Supporting those requires separate adapters and evidence.
 
@@ -8,14 +8,14 @@ The first supported project format is xtool's Swift Package Manager application.
 
 The intended primary path runs entirely on Linux, including SDK extraction, cross-compilation, signing, physical-device installation, IPA upload, and review submission. Every build step must execute on Linux. Hosted macOS, remote Xcode, and Apple-hardware build services are excluded, including as optional fallbacks.
 
-Technical feasibility is separate from Apple's SDK license, Developer Program enrollment, account access, signing permissions, app eligibility, and App Review approval. Orchard cannot grant those. It will link the applicable upstream requirements and stop at missing prerequisites.
+Technical feasibility is separate from Apple's SDK license, Developer Program enrollment, account access, signing permissions, app eligibility, and App Review approval. Pomeforge cannot grant those. It will link the applicable upstream requirements and stop at missing prerequisites.
 
 ## Components
 
 ```mermaid
 flowchart TD
     Person[Linux developer] --> App[Local graphical workspace]
-    Person --> CLI[orchard CLI]
+    Person --> CLI[pomeforge CLI]
     Agent[Optional coding agent] --> CLI
     App --> API[Authenticated loopback HTTP API]
     API --> Core[Project, doctor, planner, executor]
@@ -40,9 +40,9 @@ The CLI and HTTP API call the same Go services. There is no frontend-only fake b
 
 ## Project and state
 
-`orchard.json` contains schema version, display name, bundle identifier, supported device families, minimum iOS version, marketing version, build number, and optional App Store app/version/build IDs. It contains no credentials. The project also includes `Package.swift`, `xtool.yml`, an actual SwiftUI application, and release guidance. iPhone and iPad support must appear in the emitted bundle configuration.
+`pomeforge.json` contains schema version, display name, bundle identifier, supported device families, minimum iOS version, marketing version, build number, and optional App Store app/version/build IDs. It contains no credentials. The project also includes `Package.swift`, `xtool.yml`, an actual SwiftUI application, and release guidance. iPhone and iPad support must appear in the emitted bundle configuration.
 
-Private operation results live under `.orchard/`, ignored by Git. Tool metadata uses XDG configuration/data/cache locations on Linux. SDK files, signing identities, provisioning profiles, API private keys, and paired device records stay outside version control. Child processes inherit only the environment needed by the selected adapter; diagnostics and retained output must not dump credentials.
+Private operation results live under `.pomeforge/`, ignored by Git. Tool metadata uses XDG configuration/data/cache locations on Linux. SDK files, signing identities, provisioning profiles, API private keys, and paired device records stay outside version control. Child processes inherit only the environment needed by the selected adapter; diagnostics and retained output must not dump credentials.
 
 ## Dependency onboarding
 
@@ -58,7 +58,7 @@ The API binds only to loopback, rejects foreign Host and Origin headers, require
 
 ## Verification boundary
 
-Unit tests and subprocess fixtures establish Orchard's behavior. Linux execution establishes portability only for the tested architecture and environment. A real iOS build, on-device launch, signing validation, TestFlight processing, and App Store submission are separate gates. Do not label any of those complete based on a successful mock or process spawn.
+Unit tests and subprocess fixtures establish Pomeforge's behavior. Linux execution establishes portability only for the tested architecture and environment. A real iOS build, on-device launch, signing validation, TestFlight processing, and App Store submission are separate gates. Do not label any of those complete based on a successful mock or process spawn.
 
 Current upstream evidence and adapter commands are recorded in `docs/toolchain-research.md` after verification.
 

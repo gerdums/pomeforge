@@ -1,5 +1,5 @@
 // Package distribution implements bounded inspection and native Linux export
-// of iOS application bundles. It has no dependency on Orchard's CLI or server.
+// of iOS application bundles. It has no dependency on Pomeforge's CLI or server.
 package distribution
 
 import "time"

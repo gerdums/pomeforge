@@ -1,6 +1,6 @@
 # Native Linux distribution library
 
-`internal/distribution` is the reusable local library for signing-identity inspection, `.app`/IPA inspection, and staged App Store export. It is independent of Orchard's CLI, HTTP server, planner, bootstrap code, and graphical workspace. Export and export planning refuse non-Linux hosts at runtime; there is no macOS or hosted fallback.
+`internal/distribution` is the reusable local library for signing-identity inspection, `.app`/IPA inspection, and staged App Store export. It is independent of Pomeforge's CLI, HTTP server, planner, bootstrap code, and graphical workspace. Export and export planning refuse non-Linux hosts at runtime; there is no macOS or hosted fallback.
 
 ## Trust and identity configuration
 
@@ -11,10 +11,10 @@ Version 1 references, but never copies, these files:
 ```json
 {
   "version": 1,
-  "privateKeyPath": "/private/orchard/distribution.key",
-  "certificatePath": "/private/orchard/distribution.pem",
-  "provisioningProfilePath": "/private/orchard/app.mobileprovision",
-  "trustedRootPaths": ["/private/orchard/trust/apple-root.pem"],
+  "privateKeyPath": "/private/pomeforge/distribution.key",
+  "certificatePath": "/private/pomeforge/distribution.pem",
+  "provisioningProfilePath": "/private/pomeforge/app.mobileprovision",
+  "trustedRootPaths": ["/private/pomeforge/trust/apple-root.pem"],
   "metadata": {"label": "team store identity"}
 }
 ```
@@ -27,11 +27,11 @@ Provisioning profiles are parsed as CMS SignedData and their embedded XML or bin
 - `verified_against_explicit_roots`: the signer chain verified at the caller's time against the configured roots; or
 - `untrusted`: explicit chain verification failed.
 
-An embedded signer, an embedded intermediate, or any certificate carried inside a profile is never promoted to a trust anchor. Orchard bundles no Apple root and does not call an arbitrary configured root “Apple verified.” Operators should obtain the applicable Apple PKI certificates from Apple's official [Apple PKI repository](https://www.apple.com/certificateauthority/), verify their published fingerprints/provenance independently, convert them to PEM if necessary, and configure only the roots they intend to trust.
+An embedded signer, an embedded intermediate, or any certificate carried inside a profile is never promoted to a trust anchor. Pomeforge bundles no Apple root and does not call an arbitrary configured root “Apple verified.” Operators should obtain the applicable Apple PKI certificates from Apple's official [Apple PKI repository](https://www.apple.com/certificateauthority/), verify their published fingerprints/provenance independently, convert them to PEM if necessary, and configure only the roots they intend to trust.
 
 Inspection reports the profile-byte SHA-256, CMS integrity, explicit-chain trust, UUID/name/dates, Team Identifier, Application Identifier Prefix, application identifier, profile type, device-list key presence (including an empty array), enterprise flag, `get-task-allow`, entitlements, exact SHA-256 membership of the signing certificate, certificate dates, and key/certificate public-key matching. Store export additionally requires a current certificate and profile, verified explicit chain, exact non-wildcard bundle ID, internally consistent identifiers, App Store profile with no `ProvisionedDevices` key or enterprise flag, `get-task-allow=false`, and the selected certificate in `DeveloperCertificates`.
 
-The Application Identifier Prefix is validated and retained separately from the Team Identifier. Signing derives `application-identifier` and the default keychain access group from the former, while `com.apple.developer.team-identifier` uses the latter. They are often equal but are not interchangeable: Apple's [TN2311](https://developer.apple.com/library/archive/technotes/tn2311/_index.html) documents legacy prefixes that differ from the Team ID. Orchard never silently migrates such a prefix because that could change keychain access.
+The Application Identifier Prefix is validated and retained separately from the Team Identifier. Signing derives `application-identifier` and the default keychain access group from the former, while `com.apple.developer.team-identifier` uses the latter. They are often equal but are not interchangeable: Apple's [TN2311](https://developer.apple.com/library/archive/technotes/tn2311/_index.html) documents legacy prefixes that differ from the Team ID. Pomeforge never silently migrates such a prefix because that could change keychain access.
 
 Requested entitlements are an explicit compatible subset of profile grants. String and list grants support Apple's trailing `*` prefix pattern. Unsupported keys, absent grants, and incompatible values are machine-readable errors. The exporter creates exact application/team identifiers and never copies a profile-only wildcard value into the app. Add a new entitlement to the package's reviewed allowlist before an adapter can request it.
 
@@ -52,7 +52,7 @@ Call `PreflightExport` for one typed, read-only aggregate readiness result, or c
 The plan shows this confirmed AssetKit contract when a catalog is selected:
 
 ```text
-orchard-assets compile --catalog <validated-catalog> --app <private-staged-app> --minimum-ios 17.0 --json
+pomeforge-assets compile --catalog <validated-catalog> --app <private-staged-app> --minimum-ios 17.0 --json
 ```
 
 Complete explicit PNG slots are required for iPhone (20, 29, 40, and 60 points at applicable 2x/3x scales), iPad (20, 29, 40, 76, and 83.5 points at applicable 1x/2x scales), and the 1024-point marketing icon. Catalog trees and filenames are containment-checked, every input must be regular, and PNG dimensions must match the declared slot.
@@ -67,7 +67,7 @@ zsign -k KEY-SNAPSHOT.pem -c CERT-SNAPSHOT.pem -m PROFILE-SNAPSHOT.mobileprovisi
 
 The public plan substitutes placeholders for key, certificate, profile, entitlements, staging app, and staging output paths. A runner is trusted with those paths only for process execution and must not log or persist its `Action`. Runner errors returned by the package omit the runner's potentially sensitive error text.
 
-After zsign returns, export requires a bounded regular output, checks that it contains only the supported application payload, re-runs IPA inspection, and checks exact bundle/version/build/minimum OS, embedded profile UUID and byte hash, explicit chain, profile signature integrity, and code-resource presence. Exact zsign 1.1.2 emits DOS-style ZIP attributes, so Orchard then repacks those already-signed file bytes without modifying bundle content or signatures, assigning conventional `0755` directory/main-executable and `0644` resource modes. The canonical archive is fully re-inspected before an atomic no-replace hard-link publication in the destination filesystem. An existing output is never overwritten, including if it appears during export. The receipt includes the canonical IPA SHA-256 and size, inspection and identity facts, and `appleProcessing: "not_checked"`.
+After zsign returns, export requires a bounded regular output, checks that it contains only the supported application payload, re-runs IPA inspection, and checks exact bundle/version/build/minimum OS, embedded profile UUID and byte hash, explicit chain, profile signature integrity, and code-resource presence. Exact zsign 1.1.2 emits DOS-style ZIP attributes, so Pomeforge then repacks those already-signed file bytes without modifying bundle content or signatures, assigning conventional `0755` directory/main-executable and `0644` resource modes. The canonical archive is fully re-inspected before an atomic no-replace hard-link publication in the destination filesystem. An existing output is never overwritten, including if it appears during export. The receipt includes the canonical IPA SHA-256 and size, inspection and identity facts, and `appleProcessing: "not_checked"`.
 
 ## Current boundaries
 

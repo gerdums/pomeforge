@@ -21,19 +21,16 @@ import (
 	"strings"
 	"time"
 
-	"orchard.local/orchard/internal/orchard"
+	"pomeforge.local/pomeforge/internal/pomeforge"
 )
 
-// The app packet supplies index.html, app.js, and style.css. all: keeps this
-// package buildable with the explicitly permitted placeholder in the meantime.
-//
 //go:embed all:assets/*
 var assetFiles embed.FS
 
 const maxRequestBody = 1 << 20
 
 type API struct {
-	Service       *orchard.Service
+	Service       *pomeforge.Service
 	Token         string
 	AllowedOrigin string
 }
@@ -45,9 +42,9 @@ type envelope struct {
 }
 
 type errorBody struct {
-	Code    string                   `json:"code"`
-	Message string                   `json:"message"`
-	Result  *orchard.OperationResult `json:"result,omitempty"`
+	Code    string                     `json:"code"`
+	Message string                     `json:"message"`
+	Result  *pomeforge.OperationResult `json:"result,omitempty"`
 }
 
 func (a *API) Handler() http.Handler {
@@ -57,7 +54,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/plan", a.plan)
 	mux.HandleFunc("POST /api/run", a.run)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
-		writeError(w, http.StatusNotFound, orchard.Errorf("not_found", "API endpoint not found"))
+		writeError(w, http.StatusNotFound, pomeforge.Errorf("not_found", "API endpoint not found"))
 	})
 	mux.HandleFunc("/", a.assets)
 	return a.securityHeaders(a.validateRequest(mux))
@@ -66,19 +63,19 @@ func (a *API) Handler() http.Handler {
 func (a *API) validateRequest(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !allowedAuthority(r.Host, a.AllowedOrigin) {
-			writeError(w, http.StatusForbidden, orchard.Errorf("invalid_host", "foreign Host header rejected"))
+			writeError(w, http.StatusForbidden, pomeforge.Errorf("invalid_host", "foreign Host header rejected"))
 			return
 		}
 		if origin := r.Header.Get("Origin"); origin != "" {
 			if a.AllowedOrigin == "" || origin != a.AllowedOrigin {
-				writeError(w, http.StatusForbidden, orchard.Errorf("invalid_origin", "foreign Origin header rejected"))
+				writeError(w, http.StatusForbidden, pomeforge.Errorf("invalid_origin", "foreign Origin header rejected"))
 				return
 			}
 		}
 		if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
 			provided := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 			if provided == r.Header.Get("Authorization") || subtle.ConstantTimeCompare([]byte(provided), []byte(a.Token)) != 1 {
-				writeError(w, http.StatusUnauthorized, orchard.Errorf("unauthorized", "a valid Bearer token is required"))
+				writeError(w, http.StatusUnauthorized, pomeforge.Errorf("unauthorized", "a valid Bearer token is required"))
 				return
 			}
 		}
@@ -133,7 +130,7 @@ func (a *API) projects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if request.Directory == "" || filepath.IsAbs(request.Directory) {
-		writeError(w, http.StatusBadRequest, orchard.Errorf("invalid_path", "API project directory must be relative to the workspace"))
+		writeError(w, http.StatusBadRequest, pomeforge.Errorf("invalid_path", "API project directory must be relative to the workspace"))
 		return
 	}
 	project, err := a.Service.CreateProject(request.Directory, request.Name, request.BundleID)
@@ -147,14 +144,14 @@ func (a *API) projects(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) plan(w http.ResponseWriter, r *http.Request) {
-	var input orchard.PlanInput
+	var input pomeforge.PlanInput
 	if err := decodePOST(w, r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	workspaceAction := false
 	actionKnown := false
-	for _, action := range orchard.Actions() {
+	for _, action := range pomeforge.Actions() {
 		if action.ID == input.Action {
 			actionKnown = true
 			workspaceAction = action.Scope == "workspace"
@@ -162,29 +159,44 @@ func (a *API) plan(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !actionKnown {
-		writeError(w, http.StatusBadRequest, orchard.Errorf("unknown_action", "unknown action: "+input.Action))
+		writeError(w, http.StatusBadRequest, pomeforge.Errorf("unknown_action", "unknown action: "+input.Action))
 		return
 	}
 	if workspaceAction {
-		if input.Project != "" || input.IPA != "" || input.Device != "" {
-			writeError(w, http.StatusBadRequest, orchard.Errorf("invalid_input", "workspace setup actions do not accept project, IPA, or device fields"))
+		if input.Project != "" || input.IPA != "" || input.Device != "" || input.SourceBundle != "" || input.OutputIPA != "" || input.AssetCatalog != "" || input.IconSource != "" || input.AppID != "" || input.VersionID != "" || input.BuildID != "" || input.Version != "" {
+			writeError(w, http.StatusBadRequest, pomeforge.Errorf("invalid_input", "workspace setup actions do not accept project, IPA, or device fields"))
+			return
+		}
+		if input.Action == "signing-configure" {
+			for _, privatePath := range append([]string{input.PrivateKeyPath, input.CertificatePath, input.ProfilePath}, input.TrustedRootPaths...) {
+				if privatePath == "" || !filepath.IsAbs(privatePath) {
+					writeError(w, http.StatusBadRequest, pomeforge.Errorf("invalid_path", "signing identity paths must be nonempty absolute paths in private user state"))
+					return
+				}
+			}
+		} else if input.PrivateKeyPath != "" || input.CertificatePath != "" || input.ProfilePath != "" || len(input.TrustedRootPaths) != 0 || input.IdentityLabel != "" {
+			writeError(w, http.StatusBadRequest, pomeforge.Errorf("invalid_input", "private signing paths are accepted only by signing-configure"))
+			return
+		}
+		if input.Action != "signing-configure" && input.Action != "signing-inspect" && input.Identity != "" {
+			writeError(w, http.StatusBadRequest, pomeforge.Errorf("invalid_input", "identity is accepted only by signing actions in workspace scope"))
 			return
 		}
 		if input.ExecutablePath != "" && !filepath.IsAbs(input.ExecutablePath) {
-			writeError(w, http.StatusBadRequest, orchard.Errorf("invalid_path", "helper executablePath must be absolute"))
+			writeError(w, http.StatusBadRequest, pomeforge.Errorf("invalid_path", "helper executablePath must be absolute"))
 			return
 		}
 		if input.InputPath != "" && !filepath.IsAbs(input.InputPath) {
-			writeError(w, http.StatusBadRequest, orchard.Errorf("invalid_path", "SDK inputPath must be absolute"))
+			writeError(w, http.StatusBadRequest, pomeforge.Errorf("invalid_path", "SDK inputPath must be absolute"))
 			return
 		}
 	} else {
-		if input.Project == "" || filepath.IsAbs(input.Project) || (input.IPA != "" && filepath.IsAbs(input.IPA)) {
-			writeError(w, http.StatusBadRequest, orchard.Errorf("invalid_path", "API project and IPA paths must be relative to the workspace"))
+		if input.Project == "" || filepath.IsAbs(input.Project) || anyAbsolute(input.IPA, input.SourceBundle, input.OutputIPA, input.AssetCatalog, input.IconSource) {
+			writeError(w, http.StatusBadRequest, pomeforge.Errorf("invalid_path", "API project and IPA paths must be relative to the workspace"))
 			return
 		}
-		if input.Tool != "" || input.Helper != "" || input.ExecutablePath != "" || input.SourceRevision != "" || input.AssetKitRevision != "" || input.InputPath != "" || input.Arch != "" {
-			writeError(w, http.StatusBadRequest, orchard.Errorf("invalid_input", "project actions do not accept setup fields"))
+		if input.Tool != "" || input.Helper != "" || input.ExecutablePath != "" || input.SourceRevision != "" || input.AssetKitRevision != "" || input.InputPath != "" || input.Arch != "" || input.PrivateKeyPath != "" || input.CertificatePath != "" || input.ProfilePath != "" || len(input.TrustedRootPaths) != 0 || input.IdentityLabel != "" {
+			writeError(w, http.StatusBadRequest, pomeforge.Errorf("invalid_input", "project actions do not accept setup fields"))
 			return
 		}
 	}
@@ -194,6 +206,15 @@ func (a *API) plan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeData(w, http.StatusOK, plan)
+}
+
+func anyAbsolute(values ...string) bool {
+	for _, value := range values {
+		if value != "" && filepath.IsAbs(value) {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *API) run(w http.ResponseWriter, r *http.Request) {
@@ -216,27 +237,27 @@ func (a *API) run(w http.ResponseWriter, r *http.Request) {
 func decodePOST(w http.ResponseWriter, r *http.Request, value any) error {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
-		return orchard.Errorf("invalid_content_type", "Content-Type must be application/json")
+		return pomeforge.Errorf("invalid_content_type", "Content-Type must be application/json")
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(value); err != nil {
-		return orchard.Errorf("invalid_json", "invalid JSON body: "+err.Error())
+		return pomeforge.Errorf("invalid_json", "invalid JSON body: "+err.Error())
 	}
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		if err == nil {
-			return orchard.Errorf("invalid_json", "body must contain exactly one JSON value")
+			return pomeforge.Errorf("invalid_json", "body must contain exactly one JSON value")
 		}
-		return orchard.Errorf("invalid_json", "invalid JSON body: "+err.Error())
+		return pomeforge.Errorf("invalid_json", "invalid JSON body: "+err.Error())
 	}
 	return nil
 }
 
 func (a *API) assets(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		writeError(w, http.StatusMethodNotAllowed, orchard.Errorf("method_not_allowed", "method not allowed"))
+		writeError(w, http.StatusMethodNotAllowed, pomeforge.Errorf("method_not_allowed", "method not allowed"))
 		return
 	}
 	requested := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
@@ -249,7 +270,7 @@ func (a *API) assets(w http.ResponseWriter, r *http.Request) {
 	}
 	contents, err := fs.ReadFile(assetFiles, "assets/"+requested)
 	if err != nil && requested == "index.html" {
-		contents = []byte("<!doctype html><html><head><meta charset=utf-8><title>Orchard</title></head><body><main><h1>Orchard</h1><p>The workspace assets will be supplied by the app integration packet.</p></main></body></html>")
+		contents = []byte("<!doctype html><html><head><meta charset=utf-8><title>Pomeforge</title></head><body><main><h1>Pomeforge</h1><p>The workspace assets will be supplied by the app integration packet.</p></main></body></html>")
 		err = nil
 	}
 	if err != nil {
@@ -274,8 +295,8 @@ func writeData(w http.ResponseWriter, status int, data any) {
 func writeError(w http.ResponseWriter, status int, err error) {
 	code := "internal_error"
 	message := "internal error"
-	var result *orchard.OperationResult
-	var coded *orchard.CodedError
+	var result *pomeforge.OperationResult
+	var coded *pomeforge.CodedError
 	if errors.As(err, &coded) {
 		code, message = coded.Code, coded.Message
 		result = coded.Result
@@ -286,7 +307,7 @@ func writeError(w http.ResponseWriter, status int, err error) {
 }
 
 func statusFor(err error) int {
-	var coded *orchard.CodedError
+	var coded *pomeforge.CodedError
 	code := ""
 	if errors.As(err, &coded) {
 		code = coded.Code
@@ -325,14 +346,14 @@ type AppOptions struct {
 	Warnings io.Writer
 }
 
-func ServeApp(ctx context.Context, service *orchard.Service, options AppOptions) error {
+func ServeApp(ctx context.Context, service *pomeforge.Service, options AppOptions) error {
 	address := options.Listen
 	if address == "" {
 		address = "127.0.0.1:8787"
 	}
 	host, _, err := net.SplitHostPort(address)
 	if err != nil || host != "127.0.0.1" {
-		return orchard.Errorf("invalid_listen", "--listen must be a 127.0.0.1 host:port address")
+		return pomeforge.Errorf("invalid_listen", "--listen must be a 127.0.0.1 host:port address")
 	}
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
@@ -357,21 +378,21 @@ func ServeApp(ctx context.Context, service *orchard.Service, options AppOptions)
 	if options.JSON {
 		_ = json.NewEncoder(output).Encode(envelope{OK: true, Data: map[string]string{"url": appURL}})
 	} else {
-		fmt.Fprintf(output, "Orchard app: %s\n", appURL)
+		fmt.Fprintf(output, "Pomeforge app: %s\n", appURL)
 	}
 	if options.Open {
 		path, lookupErr := exec.LookPath("xdg-open")
 		if lookupErr != nil {
-			fmt.Fprintln(warnings, "Warning: xdg-open is unavailable; open the Orchard app URL manually.")
+			fmt.Fprintln(warnings, "Warning: xdg-open is unavailable; open the Pomeforge app URL manually.")
 		} else {
 			command := exec.Command(path, appURL)
-			command.Env = orchard.ChildEnvironmentFor(orchard.EnvironmentBrowser)
+			command.Env = pomeforge.ChildEnvironmentFor(pomeforge.EnvironmentBrowser)
 			if startErr := command.Start(); startErr != nil {
-				fmt.Fprintln(warnings, "Warning: the browser opener could not start; open the Orchard app URL manually.")
+				fmt.Fprintln(warnings, "Warning: the browser opener could not start; open the Pomeforge app URL manually.")
 			} else {
 				go func() {
 					if command.Wait() != nil {
-						fmt.Fprintln(warnings, "Warning: the browser opener exited unsuccessfully; open the Orchard app URL manually.")
+						fmt.Fprintln(warnings, "Warning: the browser opener exited unsuccessfully; open the Pomeforge app URL manually.")
 					}
 				}()
 			}

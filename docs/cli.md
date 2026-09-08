@@ -1,33 +1,33 @@
-# Orchard CLI
+# Pomeforge CLI
 
-Orchard is a local Linux CLI and authenticated loopback workspace for SwiftUI
+Pomeforge is a local Linux CLI and authenticated loopback workspace for SwiftUI
 iPhone and iPad projects. It uses JSON envelopes for automation and readable
-text by default. Run `orchard schema --json` to discover commands, parameters,
+text by default. Run `pomeforge schema --json` to discover commands, parameters,
 effects, and every supported action.
 
 ## Build and start
 
-Go 1.24 or newer is required to build Orchard itself.
+Go 1.24 or newer is required to build Pomeforge itself.
 
 ```sh
 make check
-./bin/orchard version
-./bin/orchard --help
+./bin/pomeforge version
+./bin/pomeforge --help
 ```
 
 The provided `make test`, `make vet`, `make build`, and `make cross-check`
 entrypoints require a Linux host, reject a non-Linux `HOSTS` value, and set
 `GOOS=linux`. Compile, resource, signing, export, and install workflows are also
-blocked by Orchard itself when its runtime is not Linux.
+blocked by Pomeforge itself when its runtime is not Linux.
 
 Start the browser workspace on an automatically selected loopback port:
 
 ```sh
-./bin/orchard app --workspace /path/to/workspace --listen 127.0.0.1:0
+./bin/pomeforge app --workspace /path/to/workspace --listen 127.0.0.1:0
 ```
 
-Orchard prints one usable URL such as
-`Orchard app: http://127.0.0.1:43127/#token=...`. The fragment is delivered to
+Pomeforge prints one usable URL such as
+`Pomeforge app: http://127.0.0.1:43127/#token=...`. The fragment is delivered to
 the local app and is never sent in the initial HTTP request. Add `--open` to
 start `xdg-open` directly with an argv array. If no opener is installed, the
 server stays available and prints a warning. Foreign bind addresses are
@@ -43,9 +43,9 @@ completed but its private receipt could not be stored, the error additionally
 contains the bounded, redacted operation as `error.result`.
 
 ```sh
-orchard --json doctor
-orchard doctor --json
-orchard schema --json
+pomeforge --json doctor
+pomeforge doctor --json
+pomeforge schema --json
 ```
 
 Unknown flags and arguments are rejected. Usage and validation errors exit 2,
@@ -55,33 +55,34 @@ and an executed child process returns its real nonzero exit status.
 ## Create a project
 
 ```sh
-orchard init Garden --dir ./Garden --bundle-id com.example.Garden
+pomeforge init Garden --dir ./Garden --bundle-id com.example.Garden
 ```
 
 `--dir` is the new project's destination, not an existing directory to reuse.
-Orchard refuses to overwrite any existing path, including a directory containing
+Pomeforge refuses to overwrite any existing path, including a directory containing
 untracked files. Names start with a letter and contain letters, digits, or
 underscores. Bundle identifiers contain at least two dot-separated alphanumeric
 or hyphenated components.
 
 The generated project includes:
 
-- `orchard.json`, schema version 1, with no credentials;
+- `pomeforge.json`, schema version 1, with no credentials;
 - a Swift package library product and SwiftUI `@main` app target;
 - `xtool.yml` version 1 with the selected bundle ID;
 - `Info.plist` with iPhone and iPad device families and orientations;
-- `.sourcekit-lsp/config.json`, project ignores, and release-boundary guidance.
+- a complete starter app-icon catalog for Linux asset compilation;
+- `.sourcekit-lsp/config.json`, project ignores, and release guidance.
 
 ## Diagnose prerequisites
 
 ```sh
-orchard doctor
-orchard tools --json
+pomeforge doctor
+pomeforge tools --json
 ```
 
 These commands execute bounded version probes and verify managed tool receipts.
 Missing, incompatible, and unverified tools remain explicit and include upstream
-installation URLs. Orchard never pipes an installer into a shell, invokes
+installation URLs. Pomeforge never pipes an installer into a shell, invokes
 `sudo`, or downloads Apple's SDK.
 
 ## Install tools and import an SDK
@@ -89,15 +90,15 @@ installation URLs. Orchard never pipes an installer into a shell, invokes
 Inspect each pinned download before requesting installation:
 
 ```sh
-orchard tools install xtool --json
-orchard tools install xtool --execute
-orchard tools install asc --execute
-orchard tools install zsign --execute
+pomeforge tools install xtool --json
+pomeforge tools install xtool --execute
+pomeforge tools install asc --execute
+pomeforge tools install zsign --execute
 ```
 
 Installation verifies the selected archive's size and SHA-256 and stores the
 tool in private XDG state. It does not change the shell's global `PATH`.
-Subsequent Orchard operations discover verified managed tools directly.
+Subsequent Pomeforge operations discover verified managed tools directly.
 
 Swift 6.3 or newer and the separately built unxip helper are needed for XIP
 import. The [Linux container](container.md) includes Swift, unxip and the
@@ -105,16 +106,16 @@ AssetKit bridge, and documents registering the bundled helpers. The
 [native setup guide](setup.md) covers installation without a container.
 
 ```sh
-orchard tools register unxip --path /path/to/unxip \
+pomeforge tools register unxip --path /path/to/unxip \
   --source-revision 6c3990517fcc4c1db6952fccf4c562fb14097601 --execute
-orchard sdk import --input /path/to/Xcode.xip --arch x86_64 --json
-orchard sdk import --input /path/to/Xcode.xip --arch x86_64 --execute
-orchard sdk status --execute --json
+pomeforge sdk import --input /path/to/Xcode.xip --arch x86_64 --json
+pomeforge sdk import --input /path/to/Xcode.xip --arch x86_64 --execute
+pomeforge sdk status --execute --json
 ```
 
 Use `x86_64` for a Linux amd64 host and `arm64` for a Linux arm64 host. An
 extracted `Xcode.app` directory is also accepted. Keep the same explicit XDG
-configuration across import and later builds. Orchard extracts into fresh
+configuration across import and later builds. Pomeforge extracts into fresh
 private state, stages the SDK and Clang headers with user ownership, and calls
 native `swift sdk install`. Existing SDKs are preserved; replacement is refused.
 The [toolchain decisions](linux-toolchain-decisions.md) explain why the upstream
@@ -126,11 +127,11 @@ Every operation is planned first. A plan ID covers validated inputs, project
 manifest/source/config content, referenced IPA bytes, and relevant tool state.
 
 ```sh
-orchard plan build --project ./Garden
-orchard run build --project ./Garden --execute
+pomeforge plan build --project ./Garden
+pomeforge run build --project ./Garden --execute
 
-orchard plan install --project ./Garden --device DEVICE_UDID --ipa ./Garden.ipa
-orchard run install --project ./Garden --device DEVICE_UDID --ipa ./Garden.ipa --execute --confirm
+pomeforge plan install --project ./Garden --device DEVICE_UDID --ipa ./Garden.ipa
+pomeforge run install --project ./Garden --device DEVICE_UDID --ipa ./Garden.ipa --execute --confirm
 ```
 
 `run` always requires `--execute`. App Store account writes and xtool
@@ -151,17 +152,20 @@ build-state directories, and bind planned executable bytes when the executable
 is an accessible regular file. Source inputs are limited to 64 MiB each and 512
 MiB total, selected IPAs to 8 GiB, and tool executables to 256 MiB. This content
 binding detects local replacement between planning attempts; checksum
-verification for Orchard-managed tool installation remains the bootstrap
+verification for Pomeforge-managed tool installation remains the bootstrap
 layer's responsibility.
 
 | Action | Effect | Command boundary |
 | --- | --- | --- |
 | `setup` | local read | `swift --version`; `xtool sdk status`; manual Xcode archive guidance |
 | `build` | local build | `xtool dev build --configuration debug` |
+| `release-build` | local build | Bind the imported device SDK, run `xtool dev build --configuration release`, derive DT metadata and inspect the Mach-O SDK stamp |
+| `icons` | local write | Generate the required phone, tablet and marketing PNG sizes from a 1024×1024 PNG |
 | `devices` | device read | `xtool devices --no-wait` |
 | `install` | confirmed device/signing write | `xtool install --udid DEVICE PATH`, or `xtool dev run --configuration debug --udid DEVICE` without `--ipa`; may provision/development-sign and change signing identity |
 | `launch` | device write | `xtool launch --udid DEVICE BUNDLE_ID` |
-| `export` | local build | `xtool dev build --configuration release --ipa` (unsigned) |
+| `export` | local signing/export | Copy the release bundle, compile AssetKit resources, sign with zsign and publish a new IPA without overwriting |
+| `ipa-inspect` | local read | Inspect the selected archive, profile, metadata, icons and Mach-O against the project and named identity |
 | `store-status` | account read | `asc builds info --build-id BUILD_ID --output json` |
 | `validate` | account read | `asc validate --app APP_ID` with exactly one configured version selector |
 | `upload` | account write | `asc builds upload --app APP_ID --ipa PATH --wait --output json` |
@@ -169,15 +173,58 @@ layer's responsibility.
 
 `asc submit create` is not supported because ASC 5 removed it.
 
-The generated export is an unsigned development-workflow artifact. Orchard does
-not yet perform or validate App Store distribution signing. Upload therefore
-accepts only a pre-exported IPA that the user has independently verified as
-correctly distribution-signed, and warns about that unverified prerequisite.
-Development provisioning is never described as App Store distribution signing.
+Install without `--ipa` builds, provisions and installs the development app;
+launch it with the separate `launch` action or on the device. Upload and review
+submission remain separate operations. Local inspection reports its actual
+checks and does not establish successful Apple processing.
+
+## Build and export a release
+
+Configure a named identity with private files outside the canonical workspace. No private
+key contents are accepted as CLI flags. The public identity ID and label may
+appear in plans; private signing paths are omitted from public results.
+
+```sh
+pomeforge signing configure app-store-main --label "App Store distribution" \
+  --private-key /absolute/private/distribution.key \
+  --certificate /absolute/private/certificate.pem \
+  --profile /absolute/private/AppStore.mobileprovision \
+  --trust-root /absolute/private/verified-root.pem --execute --json
+pomeforge signing list --json
+pomeforge signing inspect app-store-main --json
+
+pomeforge run release-build --project ./Garden --execute --json
+pomeforge run icons --project ./Garden --icon-source Icon-1024.png --execute --json
+pomeforge plan export --project ./Garden --identity app-store-main \
+  --source-bundle xtool/Garden.app --output-ipa Garden.ipa \
+  --asset-catalog Assets.xcassets --json
+pomeforge run export --project ./Garden --identity app-store-main \
+  --source-bundle xtool/Garden.app --output-ipa Garden.ipa \
+  --asset-catalog Assets.xcassets --execute --json
+pomeforge run ipa-inspect --project ./Garden --identity app-store-main \
+  --ipa Garden.ipa --execute --json
+```
+
+Place your 1024×1024 PNG at `Garden/Icon-1024.png` before the `icons` command.
+That replacement is optional for local export of the complete starter catalog.
+
+Release inputs and output paths are relative to the selected project, or
+absolute paths inside it. The graphical API accepts relative project paths.
+Signing input paths are absolute paths outside the canonical
+workspace. `--trust-root` is repeatable; export requires an explicitly trusted
+profile chain. The generated icon catalog is usable for local export, and its
+starter artwork is identified for replacement. The icon command preserves a
+custom catalog once its starter marker has been removed.
+
+The first distribution adapter supports one main application. Nested
+frameworks, extensions and Watch targets require further signing adapters.
+Encrypted private keys are unsupported. The [release guide](release.md)
+covers API access, certificate/profile creation, trust roots, account metadata,
+upload and submission. Those account actions require the operator's own access.
 
 ## Manifest App Store IDs
 
-Read-only validation and account writes use resource IDs from `orchard.json`:
+Read-only validation and account writes use resource IDs from `pomeforge.json`:
 
 ```json
 {
@@ -193,6 +240,10 @@ Read-only validation and account writes use resource IDs from `orchard.json`:
 UUID/resource strings; flag-like values, path separators, controls, and
 overlong IDs are rejected. These are identifiers, not credentials.
 
+Use `--app-id`, `--version-id`, and `--build-id` to override manifest values
+for one plan or run. Validation also accepts a marketing `--version` instead
+of a resource `--version-id`; exactly one version selector is sent to ASC.
+
 ASC authentication remains in its private user configuration. Credential-free
 tool probes, Swift/build tools, ASC operations, and `xdg-open` each receive a
 separate allowlisted environment. Only ASC operations inherit `ASC_*`; the
@@ -204,7 +255,7 @@ Managed processes use Linux process groups, deadlines, and bounded pipe waits so
 descendants cannot keep an operation or version probe alive indefinitely.
 Output is redacted for PEM blocks, bearer/JWT tokens, known credential environment
 values, and presigned URL queries before the bounded value reaches CLI/API output
-or private history storage. `orchard.json` is limited to 1 MiB, and history reads
+or private history storage. `pomeforge.json` is limited to 1 MiB, and history reads
 enforce an 8 MiB streaming limit while rejecting nonregular files. If an operation
 runs and a later history append fails because the file changed concurrently, JSON
 returns a `history_failed` error with the bounded, redacted operation in
@@ -212,7 +263,7 @@ returns a `history_failed` error with the bounded, redacted operation in
 
 ## Verification boundary
 
-The Go tests prove Orchard's local validation, planning, process control,
+The Go tests prove Pomeforge's local validation, planning, process control,
 history, CLI envelopes, and loopback HTTP protections. They do not prove an iOS
 SDK installation, Apple account access, distribution signing, a physical-device
 run, upload processing, or App Review submission. Those require separate trusted

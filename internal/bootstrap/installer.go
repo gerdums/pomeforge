@@ -572,7 +572,7 @@ func activate(plan Plan, executable string) error {
 		}
 		target, err := os.Readlink(active)
 		if err != nil || !isManagedActivationTarget(plan, absoluteLinkTarget(active, target)) {
-			return fmt.Errorf("%w: existing symlink is not an Orchard tool link", ErrActivationCollision)
+			return fmt.Errorf("%w: existing symlink is not a Pomeforge tool link", ErrActivationCollision)
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err

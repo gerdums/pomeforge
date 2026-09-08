@@ -3,16 +3,16 @@ set -eu
 
 umask 077
 
-state_root=${ORCHARD_STATE_ROOT:-/var/lib/orchard}
+state_root=${POMEFORGE_STATE_ROOT:-/var/lib/pomeforge}
 case $state_root in
   /*) ;;
   *)
-    printf '%s\n' "ORCHARD_STATE_ROOT must be an absolute path." >&2
+    printf '%s\n' "POMEFORGE_STATE_ROOT must be an absolute path." >&2
     exit 2
     ;;
 esac
 if [ "$state_root" = / ]; then
-  printf '%s\n' "ORCHARD_STATE_ROOT must be a dedicated directory, not /." >&2
+  printf '%s\n' "POMEFORGE_STATE_ROOT must be a dedicated directory, not /." >&2
   exit 2
 fi
 
@@ -27,6 +27,6 @@ mkdir -p -- "$state_root" "$HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACH
 chmod 0700 "$state_root" "$HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME"
 
 if [ "$#" -eq 0 ]; then
-  set -- orchard version
+  set -- pomeforge version
 fi
 exec "$@"

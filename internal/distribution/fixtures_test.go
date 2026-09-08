@@ -89,7 +89,7 @@ type profileOptions struct {
 func (f *cryptoFixture) profile(t *testing.T, options profileOptions) []byte {
 	t.Helper()
 	if options.bundle == "" {
-		options.bundle = "com.example.Orchard"
+		options.bundle = "com.example.Pomeforge"
 	}
 	if options.team == "" {
 		options.team = "TEAM123456"
@@ -204,7 +204,7 @@ func fixtureMachO() []byte {
 func fixtureInfo(t *testing.T, binaryFormat bool) []byte {
 	t.Helper()
 	info := map[string]any{
-		"CFBundleIdentifier": "com.example.Orchard", "CFBundleShortVersionString": "1.2.3", "CFBundleVersion": "42", "CFBundleExecutable": "Orchard", "MinimumOSVersion": "17.0",
+		"CFBundleIdentifier": "com.example.Pomeforge", "CFBundleShortVersionString": "1.2.3", "CFBundleVersion": "42", "CFBundleExecutable": "Pomeforge", "MinimumOSVersion": "17.0",
 		"UIDeviceFamily": []int{1, 2}, "CFBundleIconName": "AppIcon",
 		"CFBundleIcons":      map[string]any{"CFBundlePrimaryIcon": map[string]any{"CFBundleIconName": "AppIcon", "CFBundleIconFiles": []string{"AppIcon20x20", "AppIcon29x29", "AppIcon40x40", "AppIcon60x60"}}},
 		"CFBundleIcons~ipad": map[string]any{"CFBundlePrimaryIcon": map[string]any{"CFBundleIconName": "AppIcon", "CFBundleIconFiles": []string{"AppIcon20x20", "AppIcon29x29", "AppIcon40x40", "AppIcon76x76", "AppIcon83.5x83.5"}}},
@@ -237,12 +237,12 @@ func fixtureInfoWith(t *testing.T, key string, value any) []byte {
 
 func writeBundle(t *testing.T, dir string, binaryInfo bool) string {
 	t.Helper()
-	app := filepath.Join(dir, "Orchard.app")
+	app := filepath.Join(dir, "Pomeforge.app")
 	if err := os.Mkdir(app, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	writePrivate(t, filepath.Join(app, "Info.plist"), fixtureInfo(t, binaryInfo))
-	if err := os.WriteFile(filepath.Join(app, "Orchard"), fixtureMachO(), 0o700); err != nil {
+	if err := os.WriteFile(filepath.Join(app, "Pomeforge"), fixtureMachO(), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	writeCompiledIcons(t, app, "AppIcon")
@@ -286,12 +286,12 @@ func writeIPA(t *testing.T, file string, entries []zipEntry) {
 func validIPAEntries(t *testing.T, profile []byte, binaryInfo bool) []zipEntry {
 	t.Helper()
 	entries := []zipEntry{
-		{"Payload/Orchard.app/Info.plist", fixtureInfo(t, binaryInfo), 0o600},
-		{"Payload/Orchard.app/Orchard", fixtureMachO(), 0o700},
-		{"Payload/Orchard.app/embedded.mobileprovision", profile, 0o600},
+		{"Payload/Pomeforge.app/Info.plist", fixtureInfo(t, binaryInfo), 0o600},
+		{"Payload/Pomeforge.app/Pomeforge", fixtureMachO(), 0o700},
+		{"Payload/Pomeforge.app/embedded.mobileprovision", profile, 0o600},
 	}
 	for _, requirement := range compiledIconRequirements("AppIcon") {
-		entries = append(entries, zipEntry{"Payload/Orchard.app/" + requirement.filename, fixturePNG(t, requirement.dimension), 0o600})
+		entries = append(entries, zipEntry{"Payload/Pomeforge.app/" + requirement.filename, fixturePNG(t, requirement.dimension), 0o600})
 	}
 	return entries
 }
@@ -348,8 +348,8 @@ func zipBundle(t *testing.T, app, output, profile string, extra ...zipEntry) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entries = append(entries, zipEntry{name: "Payload/Orchard.app/embedded.mobileprovision", data: profileData, mode: 0o600})
-	entries = append(entries, zipEntry{name: "Payload/Orchard.app/_CodeSignature/CodeResources", data: []byte("synthetic-not-a-real-signature"), mode: 0o600})
+	entries = append(entries, zipEntry{name: "Payload/Pomeforge.app/embedded.mobileprovision", data: profileData, mode: 0o600})
+	entries = append(entries, zipEntry{name: "Payload/Pomeforge.app/_CodeSignature/CodeResources", data: []byte("synthetic-not-a-real-signature"), mode: 0o600})
 	entries = append(entries, extra...)
 	writeIPA(t, output, entries)
 }

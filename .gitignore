@@ -1,5 +1,7 @@
 /bin/
 /dist/
+/.pomeforge/
+# Legacy private state remains excluded; it is not read or migrated.
 /.orchard/
 *.ipa
 *.p12

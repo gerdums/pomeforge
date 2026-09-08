@@ -54,7 +54,7 @@ func VerifyInstalled(ctx context.Context, plan Plan) (Receipt, error) {
 	}
 	target, err := os.Readlink(active)
 	if err != nil || !isManagedActivationTarget(plan, absoluteLinkTarget(active, target)) {
-		return Receipt{}, fmt.Errorf("%w: active link is not managed by Orchard", ErrInstallInvalid)
+		return Receipt{}, fmt.Errorf("%w: active link is not managed by Pomeforge", ErrInstallInvalid)
 	}
 	resolved, err := filepath.EvalSymlinks(active)
 	if err != nil || filepath.Clean(resolved) != filepath.Clean(executable) {

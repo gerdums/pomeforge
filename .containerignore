@@ -1,4 +1,4 @@
-# Send only Orchard build inputs. The final exclusions override every allow rule.
+# Send only Pomeforge build inputs. The final exclusions override every allow rule.
 **
 !go.mod
 !go.sum
@@ -35,6 +35,11 @@
 **/.workflow/**
 
 # Private state and build/dependency caches.
+.pomeforge
+.pomeforge/**
+**/.pomeforge
+**/.pomeforge/**
+# Legacy Orchard private state stays excluded; Pomeforge does not read or migrate it.
 .orchard
 .orchard/**
 **/.orchard

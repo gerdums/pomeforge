@@ -101,10 +101,10 @@ func TestDefaultPathsUsesXDGAndRelativeFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if paths.ToolsDir != filepath.Join(data, "orchard", "tools") {
+	if paths.ToolsDir != filepath.Join(data, "pomeforge", "tools") {
 		t.Fatalf("ToolsDir = %q", paths.ToolsDir)
 	}
-	if paths.DownloadsDir != filepath.Join(home, ".cache", "orchard", "downloads") {
+	if paths.DownloadsDir != filepath.Join(home, ".cache", "pomeforge", "downloads") {
 		t.Fatalf("DownloadsDir = %q", paths.DownloadsDir)
 	}
 }

@@ -24,11 +24,11 @@ jobs:
       - name: Vet
         run: GOOS=linux go vet ./...
       - name: Build native CLI
-        run: CGO_ENABLED=0 GOOS=linux go build -trimpath -o /tmp/orchard ./cmd/orchard
+        run: CGO_ENABLED=0 GOOS=linux go build -trimpath -o /tmp/pomeforge ./cmd/pomeforge
       - name: Build Linux amd64
-        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /tmp/orchard-linux-amd64 ./cmd/orchard
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /tmp/pomeforge-linux-amd64 ./cmd/pomeforge
       - name: Build Linux arm64
-        run: CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o /tmp/orchard-linux-arm64 ./cmd/orchard
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o /tmp/pomeforge-linux-arm64 ./cmd/pomeforge
 
   web-and-packaging:
     runs-on: ubuntu-latest

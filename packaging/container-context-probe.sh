@@ -41,7 +41,7 @@ cp "$repo_root/packaging/tests/Containerfile.context" "$probe_root/Containerfile
 cp "$repo_root/go.mod" "$probe_root/go.mod"
 mkdir -p -- "$probe_root/docs/third-party" "$probe_root/internal/.git" \
   "$probe_root/internal/.sandcastle" "$probe_root/internal/.workflow" \
-  "$probe_root/internal/.asc" "$probe_root/internal/.orchard" \
+  "$probe_root/internal/.asc" "$probe_root/internal/.pomeforge" "$probe_root/internal/.orchard" \
   "$probe_root/internal/apps/demo" "$probe_root/internal/SDKs/iPhoneOS.sdk"
 : > "$probe_root/THIRD_PARTY_NOTICES.md"
 : > "$probe_root/docs/third-party/context-license.txt"
@@ -53,11 +53,12 @@ mkdir -p -- "$probe_root/docs/third-party" "$probe_root/internal/.git" \
 : > "$probe_root/internal/demo.pem"
 : > "$probe_root/internal/demo.xip"
 : > "$probe_root/internal/.asc/config.json"
+: > "$probe_root/internal/.pomeforge/state.json"
 : > "$probe_root/internal/.orchard/state.json"
 : > "$probe_root/internal/apps/demo/marker"
 : > "$probe_root/internal/SDKs/iPhoneOS.sdk/marker"
 
-for directory in .git .sandcastle .orchard .cache .swiftpm .build SDKs workspace workspaces projects apps; do
+for directory in .git .sandcastle .pomeforge .orchard .cache .swiftpm .build SDKs workspace workspaces projects apps; do
   mkdir -p -- "$probe_root/$directory"
   : > "$probe_root/$directory/context-sentinel"
 done

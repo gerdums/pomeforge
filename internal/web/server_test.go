@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,20 +15,20 @@ import (
 	"testing"
 	"time"
 
-	"orchard.local/orchard/internal/orchard"
+	"pomeforge.local/pomeforge/internal/pomeforge"
 )
 
-type webTools map[string]orchard.ToolStatus
+type webTools map[string]pomeforge.ToolStatus
 
-func (f webTools) Probe(_ context.Context, id string) orchard.ToolStatus {
+func (f webTools) Probe(_ context.Context, id string) pomeforge.ToolStatus {
 	if status, ok := f[id]; ok {
 		return status
 	}
-	return orchard.ToolStatus{ID: id, Name: id, Status: "missing", Detail: "missing", InstallURL: "https://example.invalid"}
+	return pomeforge.ToolStatus{ID: id, Name: id, Status: "missing", Detail: "missing", InstallURL: "https://example.invalid"}
 }
 
-func (f webTools) ProbeAll(ctx context.Context) []orchard.ToolStatus {
-	result := make([]orchard.ToolStatus, 0)
+func (f webTools) ProbeAll(ctx context.Context) []pomeforge.ToolStatus {
+	result := make([]pomeforge.ToolStatus, 0)
 	for _, id := range []string{"xtool", "swift", "asc", "zsign", "idevice_id", "usbmuxd"} {
 		result = append(result, f.Probe(ctx, id))
 	}
@@ -43,9 +44,9 @@ func testAPI(t *testing.T) (*httptest.Server, *API, string) {
 	}
 	tools := webTools{}
 	for _, id := range []string{"xtool", "swift", "asc"} {
-		tools[id] = orchard.ToolStatus{ID: id, Name: id, Status: "available", Version: "test", Path: executable, Detail: "test"}
+		tools[id] = pomeforge.ToolStatus{ID: id, Name: id, Status: "available", Version: "test", Path: executable, Detail: "test"}
 	}
-	service, err := orchard.NewService(workspace, tools)
+	service, err := pomeforge.NewService(workspace, tools)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,26 +187,25 @@ func TestAPIProjectPlanAndConfirmationGate(t *testing.T) {
 		t.Fatalf("create status = %d: %s", response.StatusCode, body)
 	}
 	_ = response.Body.Close()
-	manifest, _, err := orchard.LoadManifest(filepath.Join(workspace, "Demo"))
+	manifest, _, err := pomeforge.LoadManifest(filepath.Join(workspace, "Demo"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	manifest.AppStore.AppID = "1001"
+	manifest.AppStore.VersionID = "a1b2c3d4-1111-4222-8333-abcdef123456"
+	manifest.AppStore.BuildID = "b2c3d4e5-2222-4333-8444-bcdefa234567"
 	encoded, _ := json.MarshalIndent(manifest, "", "  ")
-	if err := os.WriteFile(filepath.Join(workspace, "Demo", "orchard.json"), append(encoded, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, "Demo", "pomeforge.json"), append(encoded, '\n'), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(workspace, "Demo.ipa"), []byte("fixture"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	response = request(t, server, http.MethodPost, "/api/plan", `{"action":"upload","project":"Demo","ipa":"Demo.ipa"}`, "test-token", "")
+	response = request(t, server, http.MethodPost, "/api/plan", `{"action":"submit","project":"Demo"}`, "test-token", "")
 	if response.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(response.Body)
 		t.Fatalf("plan status = %d: %s", response.StatusCode, body)
 	}
 	var wrapped struct {
-		OK   bool         `json:"ok"`
-		Data orchard.Plan `json:"data"`
+		OK   bool           `json:"ok"`
+		Data pomeforge.Plan `json:"data"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&wrapped); err != nil {
 		t.Fatal(err)
@@ -222,9 +222,32 @@ func TestAPIProjectPlanAndConfirmationGate(t *testing.T) {
 	_ = response.Body.Close()
 }
 
+func TestAPISigningPathsAreAcceptedButNeverReturned(t *testing.T) {
+	server, _, _ := testAPI(t)
+	privateRoot := t.TempDir()
+	privateKey := filepath.Join(privateRoot, "missing-sensitive-name.key")
+	certificate := filepath.Join(privateRoot, "certificate.pem")
+	profile := filepath.Join(privateRoot, "profile.mobileprovision")
+	body := fmt.Sprintf(`{"action":"signing-configure","identity":"release-main","identityLabel":"Release main","privateKeyPath":%q,"certificatePath":%q,"profilePath":%q}`, privateKey, certificate, profile)
+	response := request(t, server, http.MethodPost, "/api/plan", body, "test-token", "")
+	data, _ := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.StatusCode, data)
+	}
+	for _, privatePath := range []string{privateKey, certificate, profile} {
+		if bytes.Contains(data, []byte(privatePath)) {
+			t.Fatalf("API error leaked private identity path %q: %s", privatePath, data)
+		}
+	}
+	if !bytes.Contains(data, []byte("[private-path]")) {
+		t.Fatalf("API error omitted actionable redaction marker: %s", data)
+	}
+}
+
 func TestAPIRejectsStaleStoredPlan(t *testing.T) {
 	server, _, workspace := testAPI(t)
-	project, err := orchard.CreateProject(workspace, "Demo", "Demo", "com.example.Demo")
+	project, err := pomeforge.CreateProject(workspace, "Demo", "Demo", "com.example.Demo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +256,7 @@ func TestAPIRejectsStaleStoredPlan(t *testing.T) {
 		t.Fatalf("plan status = %d", response.StatusCode)
 	}
 	var wrapped struct {
-		Data orchard.Plan `json:"data"`
+		Data pomeforge.Plan `json:"data"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&wrapped); err != nil {
 		t.Fatal(err)
@@ -256,7 +279,7 @@ func TestAPIRejectsStaleStoredPlan(t *testing.T) {
 
 func TestAPIReturnsRedactedFailedOperationResult(t *testing.T) {
 	server, api, workspace := testAPI(t)
-	if _, err := orchard.CreateProject(workspace, "Demo", "Demo", "com.example.Demo"); err != nil {
+	if _, err := pomeforge.CreateProject(workspace, "Demo", "Demo", "com.example.Demo"); err != nil {
 		t.Fatal(err)
 	}
 	executable := filepath.Join(workspace, "xtool-fixture")
@@ -264,10 +287,10 @@ func TestAPIReturnsRedactedFailedOperationResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	tools := api.Service.Tools.(webTools)
-	tools["xtool"] = orchard.ToolStatus{ID: "xtool", Name: "xtool", Status: "available", Path: executable, Detail: "fixture"}
+	tools["xtool"] = pomeforge.ToolStatus{ID: "xtool", Name: "xtool", Status: "available", Path: executable, Detail: "fixture"}
 	response := request(t, server, http.MethodPost, "/api/plan", `{"action":"devices","project":"Demo"}`, "test-token", "")
 	var planned struct {
-		Data orchard.Plan `json:"data"`
+		Data pomeforge.Plan `json:"data"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&planned); err != nil {
 		t.Fatal(err)
@@ -286,19 +309,19 @@ func TestAPIReturnsRedactedFailedOperationResult(t *testing.T) {
 
 func TestAPIHistoryFailureCarriesCompletedOperationResult(t *testing.T) {
 	server, api, workspace := testAPI(t)
-	if _, err := orchard.CreateProject(workspace, "Demo", "Demo", "com.example.Demo"); err != nil {
+	if _, err := pomeforge.CreateProject(workspace, "Demo", "Demo", "com.example.Demo"); err != nil {
 		t.Fatal(err)
 	}
 	executable := filepath.Join(workspace, "history-fixture")
-	script := "#!/bin/sh\nrm .orchard/history.jsonl && mkdir .orchard/history.jsonl\nprintf 'completed API output token=syntheticreceiptsecret'\n"
+	script := "#!/bin/sh\nrm .pomeforge/history.jsonl && mkdir .pomeforge/history.jsonl\nprintf 'completed API output token=syntheticreceiptsecret'\n"
 	if err := os.WriteFile(executable, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	tools := api.Service.Tools.(webTools)
-	tools["xtool"] = orchard.ToolStatus{ID: "xtool", Name: "xtool", Status: "available", Path: executable, Detail: "fixture"}
+	tools["xtool"] = pomeforge.ToolStatus{ID: "xtool", Name: "xtool", Status: "available", Path: executable, Detail: "fixture"}
 	response := request(t, server, http.MethodPost, "/api/plan", `{"action":"devices","project":"Demo"}`, "test-token", "")
 	var planned struct {
-		Data orchard.Plan `json:"data"`
+		Data pomeforge.Plan `json:"data"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&planned); err != nil {
 		t.Fatal(err)
@@ -313,7 +336,7 @@ func TestAPIHistoryFailureCarriesCompletedOperationResult(t *testing.T) {
 }
 
 func TestServeAppPrintsActualTokenURLAndRejectsForeignBind(t *testing.T) {
-	service, err := orchard.NewService(t.TempDir(), webTools{})
+	service, err := pomeforge.NewService(t.TempDir(), webTools{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +353,7 @@ func TestServeAppPrintsActualTokenURLAndRejectsForeignBind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(line, "Orchard app: http://127.0.0.1:") || !strings.Contains(line, "/#token=") {
+	if !strings.HasPrefix(line, "Pomeforge app: http://127.0.0.1:") || !strings.Contains(line, "/#token=") {
 		t.Fatalf("unexpected app line %q", line)
 	}
 	cancel()
@@ -379,7 +402,7 @@ func TestServeAppPrintsActualTokenURLAndRejectsForeignBind(t *testing.T) {
 
 func TestServeAppBrowserOpenerEnvironment(t *testing.T) {
 	workspace := t.TempDir()
-	service, err := orchard.NewService(workspace, webTools{})
+	service, err := pomeforge.NewService(workspace, webTools{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,7 +467,7 @@ func TestAPIPlansWorkspaceSetupWithoutAProjectAndStrictlyValidatesFields(t *test
 		t.Fatalf("workspace plan status=%d body=%s", response.StatusCode, body)
 	}
 	var envelope struct {
-		Data orchard.Plan `json:"data"`
+		Data pomeforge.Plan `json:"data"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
 		t.Fatal(err)
@@ -469,8 +492,8 @@ func TestAPIPlansWorkspaceSetupWithoutAProjectAndStrictlyValidatesFields(t *test
 
 func TestAPIErrorEnvelopeIncludesCompletedResult(t *testing.T) {
 	recorder := httptest.NewRecorder()
-	result := orchard.OperationResult{ID: "result-1", Action: "sdk-import", Status: "failed", ExitCode: 9, Scope: "workspace", Output: "bounded failure"}
-	writeError(recorder, http.StatusUnprocessableEntity, orchard.ErrorWithResult("operation_failed", "operation failed", result))
+	result := pomeforge.OperationResult{ID: "result-1", Action: "sdk-import", Status: "failed", ExitCode: 9, Scope: "workspace", Output: "bounded failure"}
+	writeError(recorder, http.StatusUnprocessableEntity, pomeforge.ErrorWithResult("operation_failed", "operation failed", result))
 	if !bytes.Contains(recorder.Body.Bytes(), []byte(`"result":{"id":"result-1"`)) || !bytes.Contains(recorder.Body.Bytes(), []byte(`"scope":"workspace"`)) {
 		t.Fatalf("result-bearing error envelope = %s", recorder.Body.Bytes())
 	}

@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#171a18">
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'self'">
-  <title>Orchard workspace</title>
+  <title>Pomeforge workspace</title>
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
 </head>
@@ -16,13 +16,13 @@
 
   <div class="app-shell">
     <header class="topbar">
-      <a class="brand" href="#workspace" aria-label="Orchard workspace home">
+      <a class="brand" href="#workspace" aria-label="Pomeforge workspace home">
         <svg class="brand-mark" viewBox="0 0 36 36" aria-hidden="true">
           <circle cx="18" cy="19" r="11.5" fill="none" stroke="currentColor" stroke-width="2.2"/>
           <path d="M18 8c0-4 2.6-6.1 6.7-6.1-.2 4.2-2.5 6.2-6.7 6.1Z" fill="currentColor"/>
           <path d="M18 8.2c-2-2.4-4.4-3.4-7.2-2.9" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2.2"/>
         </svg>
-        <span>Orchard</span>
+        <span>Pomeforge</span>
       </a>
       <p id="connection-status" class="connection-status" aria-live="polite">Connecting…</p>
     </header>
@@ -39,7 +39,7 @@
         <p id="project-path" class="secondary sidebar-path">Waiting for workspace</p>
       </div>
 
-      <nav class="view-tabs" aria-label="Orchard sections">
+      <nav class="view-tabs" aria-label="Pomeforge sections">
         <button class="view-tab is-active" type="button" data-view="work" aria-current="page">
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4.5h14v11H3zM6 8l2.5 2L6 12m4 0h4"/></svg>
           <span>Work</span>
@@ -82,7 +82,7 @@
         <div id="empty-projects" class="empty-state" hidden>
           <svg viewBox="0 0 56 56" aria-hidden="true"><path d="M9 16.5h14l4 5h20v25H9zM17 16.5V10h15l4 5"/></svg>
           <h2>No projects yet</h2>
-          <p>Create an xtool Swift package inside this workspace. Orchard will never overwrite an existing directory.</p>
+          <p>Create an xtool Swift package inside this workspace. Pomeforge will never overwrite an existing directory.</p>
           <button id="empty-create-project" class="primary-button" type="button">Create first project</button>
           <button id="empty-open-setup" class="secondary-button" type="button">Set up tools first</button>
         </div>
@@ -93,7 +93,7 @@
               <p class="step-number">01</p>
               <div>
                 <h2 id="operation-title">Choose an operation</h2>
-                <p>Select what Orchard should prepare. Nothing runs while reviewing a plan.</p>
+                <p>Select what Pomeforge should prepare. Nothing runs while reviewing a plan.</p>
               </div>
             </div>
 
@@ -103,7 +103,7 @@
                 <select id="action-select" disabled>
                   <option value="">Choose an operation</option>
                 </select>
-                <p id="action-description" class="field-help">Available operations come from Orchard’s current capabilities.</p>
+                <p id="action-description" class="field-help">Available operations come from Pomeforge’s current capabilities.</p>
               </div>
               <div id="ipa-field" class="field" hidden>
                 <label for="ipa-input">IPA path <span>optional</span></label>
@@ -114,6 +114,43 @@
                 <label for="device-input">Device identifier <span>optional</span></label>
                 <input id="device-input" type="text" autocomplete="off" placeholder="00008110-…">
                 <p class="field-help">Leave empty when only one eligible device is connected.</p>
+              </div>
+              <div id="source-bundle-field" class="field" hidden>
+                <label for="source-bundle-input">Release app bundle path</label>
+                <input id="source-bundle-input" type="text" autocomplete="off" placeholder="xtool/MyApp.app">
+              </div>
+              <div id="output-ipa-field" class="field" hidden>
+                <label for="output-ipa-input">New IPA output path</label>
+                <input id="output-ipa-input" type="text" autocomplete="off" placeholder="MyApp.ipa">
+              </div>
+              <div id="asset-catalog-field" class="field" hidden>
+                <label for="asset-catalog-input">Asset catalog path <span>optional</span></label>
+                <input id="asset-catalog-input" type="text" autocomplete="off" placeholder="Assets.xcassets">
+              </div>
+              <div id="icon-source-field" class="field" hidden>
+                <label for="icon-source-input">1024px PNG path</label>
+                <input id="icon-source-input" type="text" autocomplete="off" placeholder="Icon-1024.png">
+              </div>
+              <div id="identity-field" class="field" hidden>
+                <label for="identity-select">Named signing identity</label>
+                <select id="identity-select"><option value="">Choose an identity</option></select>
+                <p class="field-help">Only safe identity labels and public inspection facts are shown.</p>
+              </div>
+              <div id="app-id-field" class="field" hidden>
+                <label for="app-id-input">App Store app ID</label>
+                <input id="app-id-input" type="text" inputmode="numeric" autocomplete="off" placeholder="123456789">
+              </div>
+              <div id="version-id-field" class="field" hidden>
+                <label for="version-id-input">Version resource ID</label>
+                <input id="version-id-input" type="text" autocomplete="off" placeholder="00000000-0000-4000-8000-000000000000">
+              </div>
+              <div id="build-id-field" class="field" hidden>
+                <label for="build-id-input">Build resource ID</label>
+                <input id="build-id-input" type="text" autocomplete="off" placeholder="00000000-0000-4000-8000-000000000000">
+              </div>
+              <div id="version-field" class="field" hidden>
+                <label for="version-input">Marketing version <span>optional alternative to version ID</span></label>
+                <input id="version-input" type="text" autocomplete="off" placeholder="1.0.0">
               </div>
             </div>
 
@@ -161,7 +198,7 @@
           <div>
             <p class="eyebrow">Environment</p>
             <h1 id="prerequisites-title">Prerequisites</h1>
-            <p class="lede">Tool availability and capability limits reported by the local Orchard process.</p>
+            <p class="lede">Tool availability and capability limits reported by the local Pomeforge process.</p>
           </div>
           <button id="refresh-diagnostics" class="secondary-button" type="button">Refresh diagnostics</button>
         </header>
@@ -200,13 +237,13 @@
               <div id="setup-helper-field" class="field" hidden>
                 <label for="setup-helper-select">Helper</label>
                 <select id="setup-helper-select">
-                  <option value="orchard-assets">orchard-assets</option>
+                  <option value="pomeforge-assets">pomeforge-assets</option>
                   <option value="unxip">unxip</option>
                 </select>
               </div>
               <div id="setup-helper-path-field" class="field" hidden>
                 <label for="setup-helper-path">Executable path</label>
-                <input id="setup-helper-path" type="text" autocomplete="off" placeholder="/absolute/path/orchard-assets">
+                <input id="setup-helper-path" type="text" autocomplete="off" placeholder="/absolute/path/pomeforge-assets">
               </div>
               <div id="setup-source-revision-field" class="field" hidden>
                 <label for="setup-source-revision">Source revision <span>optional</span></label>
@@ -227,6 +264,31 @@
                   <option value="x86_64">x86_64</option>
                   <option value="arm64">arm64</option>
                 </select>
+              </div>
+              <div id="setup-identity-id-field" class="field" hidden>
+                <label for="setup-identity-id">Identity ID</label>
+                <input id="setup-identity-id" type="text" autocomplete="off" placeholder="app-store-main">
+              </div>
+              <div id="setup-identity-label-field" class="field" hidden>
+                <label for="setup-identity-label">Public label</label>
+                <input id="setup-identity-label" type="text" autocomplete="off" placeholder="App Store distribution">
+              </div>
+              <div id="setup-private-key-field" class="field" hidden>
+                <label for="setup-private-key">Private key path</label>
+                <input id="setup-private-key" type="text" autocomplete="off" placeholder="/home/user/.config/pomeforge-private/distribution.key">
+              </div>
+              <div id="setup-certificate-field" class="field" hidden>
+                <label for="setup-certificate">Certificate path</label>
+                <input id="setup-certificate" type="text" autocomplete="off" placeholder="/home/user/.config/pomeforge-private/certificate.pem">
+              </div>
+              <div id="setup-profile-field" class="field" hidden>
+                <label for="setup-profile">Provisioning profile path</label>
+                <input id="setup-profile" type="text" autocomplete="off" placeholder="/home/user/.config/pomeforge-private/AppStore.mobileprovision">
+              </div>
+              <div id="setup-trust-roots-field" class="field full-field" hidden>
+                <label for="setup-trust-roots">Explicit trust-root paths <span>optional, one per line</span></label>
+                <textarea id="setup-trust-roots" rows="3" autocomplete="off" placeholder="/home/user/.config/pomeforge-private/AppleRootCA-G3.pem"></textarea>
+                <p class="field-help">Configured roots are operator inputs; Pomeforge does not call them Apple roots.</p>
               </div>
             </div>
             <div class="button-row">
@@ -250,10 +312,18 @@
           </div>
         </section>
 
+        <section class="capability-section" aria-labelledby="identities-title">
+          <div class="subsection-header">
+            <h2 id="identities-title">Signing identities</h2>
+            <p class="secondary">Public certificate/profile facts only. Private paths and contents never appear here.</p>
+          </div>
+          <div id="identity-list" class="diagnostic-list"></div>
+        </section>
+
         <section class="capability-section" aria-labelledby="capabilities-title">
           <div class="subsection-header">
             <h2 id="capabilities-title">Capability limitations</h2>
-            <p class="secondary">Orchard stops when a required tool or entitlement is unavailable.</p>
+            <p class="secondary">Pomeforge stops when a required tool or entitlement is unavailable.</p>
           </div>
           <div id="capability-list" class="diagnostic-list"></div>
         </section>
@@ -264,7 +334,7 @@
           <div>
             <p class="eyebrow">Local records</p>
             <h1 id="results-title">Result log</h1>
-            <p class="lede">Actual operation output returned by Orchard. Session tokens and credentials are never shown here.</p>
+            <p class="lede">Actual operation output returned by Pomeforge. Session tokens and credentials are never shown here.</p>
           </div>
         </header>
         <div id="result-list" class="result-list" aria-live="polite"></div>
@@ -281,7 +351,7 @@
         </div>
         <button id="close-create-project" class="icon-button" type="button" aria-label="Close create project dialog">×</button>
       </div>
-      <p class="dialog-intro">Orchard creates the project beneath the configured workspace and refuses to overwrite existing content.</p>
+      <p class="dialog-intro">Pomeforge creates the project beneath the configured workspace and refuses to overwrite existing content.</p>
       <div class="field">
         <label for="project-name">Project name</label>
         <input id="project-name" name="name" required maxlength="80" autocomplete="off" placeholder="Field Notes">
@@ -293,7 +363,7 @@
       <div class="field">
         <label for="project-directory">Relative directory</label>
         <input id="project-directory" name="directory" required maxlength="255" autocomplete="off" placeholder="field-notes">
-        <p class="field-help">Use a path inside this Orchard workspace.</p>
+        <p class="field-help">Use a path inside this Pomeforge workspace.</p>
       </div>
       <p id="create-status" class="inline-status" aria-live="polite"></p>
       <div class="dialog-actions">
