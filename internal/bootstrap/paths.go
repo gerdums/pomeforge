@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Paths contains every filesystem root managed by the installer. Custom Paths
@@ -74,4 +75,46 @@ func validatePaths(paths Paths) error {
 		}
 	}
 	return nil
+}
+
+// inspectDirectoryPath verifies every existing component without following a
+// symbolic link. When create is true, missing components are created one at a
+// time only after their ancestors have passed inspection. Existing ancestors
+// are never chmodded; only the managed leaf is made private.
+func inspectDirectoryPath(directory string, create bool) error {
+	if directory == "" || !filepath.IsAbs(directory) || filepath.Clean(directory) != directory || directory == string(filepath.Separator) {
+		return fmt.Errorf("private directory must be a clean, absolute, non-root path: %s", directory)
+	}
+	volume := filepath.VolumeName(directory)
+	current := volume + string(filepath.Separator)
+	parts := splitPathComponents(strings.TrimPrefix(directory, current))
+	for index, component := range parts {
+		current = filepath.Join(current, component)
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) && create {
+			if err := os.Mkdir(current, 0o700); err != nil {
+				return fmt.Errorf("create private directory %s: %w", current, err)
+			}
+			info, err = os.Lstat(current)
+		}
+		if err != nil {
+			return fmt.Errorf("inspect private directory ancestor %s: %w", current, err)
+		}
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("private path component is not a real directory: %s", current)
+		}
+		if index == len(parts)-1 && create {
+			if err := os.Chmod(current, 0o700); err != nil {
+				return fmt.Errorf("protect private directory %s: %w", current, err)
+			}
+		}
+	}
+	return nil
+}
+
+func splitPathComponents(value string) []string {
+	if value == "" {
+		return nil
+	}
+	return strings.Split(value, string(filepath.Separator))
 }

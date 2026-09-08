@@ -27,6 +27,8 @@ var (
 	ErrUnsupportedPlatform = errors.New("unsupported operating system or architecture")
 	ErrInstallConflict     = errors.New("another install of this tool is in progress")
 	ErrActivationCollision = errors.New("activation path is not managed by Orchard")
+	ErrInstallAbsent       = errors.New("managed tool installation is absent")
+	ErrInstallInvalid      = errors.New("managed tool installation is invalid")
 )
 
 // Catalog is the complete, pinned Orchard tool catalog.

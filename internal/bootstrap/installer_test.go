@@ -170,7 +170,7 @@ func TestSafeArchiveRejectsMaliciousAndInvalidInputs(t *testing.T) {
 			if err := os.WriteFile(archivePath, archive, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			_, err := extractTarGzip(archivePath, t.TempDir(), "zsign")
+			_, err := extractTarGzip(context.Background(), archivePath, t.TempDir(), "zsign")
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("extractTarGzip() error = %v, want %q", err, test.want)
 			}

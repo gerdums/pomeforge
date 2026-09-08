@@ -12,7 +12,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -116,8 +115,28 @@ func (i Installer) Install(ctx context.Context, plan Plan) (Receipt, error) {
 	if err := verifyExecutableWithin(complete, executable); err != nil {
 		return Receipt{}, err
 	}
+	if plan.asset.Format == "binary" {
+		if ok, err := verifyFile(executable, plan.asset.Size, plan.asset.SHA256); err != nil || !ok {
+			if err == nil {
+				err = errors.New("binary executable differs from the pinned artifact")
+			}
+			return Receipt{}, fmt.Errorf("verify staged binary: %w", err)
+		}
+	}
+	if err := writeInstallManifest(complete); err != nil {
+		return Receipt{}, fmt.Errorf("record installed tree: %w", err)
+	}
 
 	versionRoot := plan.versionRoot()
+	if err := verifyPrivateTree(plan.paths.ToolsDir, plan.tool.ID, plan.tool.Version); err != nil {
+		return Receipt{}, err
+	}
+	if _, err := os.Lstat(versionRoot); !errors.Is(err, os.ErrNotExist) {
+		if err == nil {
+			return Receipt{}, fmt.Errorf("managed version path appeared before commit: %s", versionRoot)
+		}
+		return Receipt{}, fmt.Errorf("recheck managed version path: %w", err)
+	}
 	if err := os.Rename(complete, versionRoot); err != nil {
 		return Receipt{}, fmt.Errorf("commit installed version: %w", err)
 	}
@@ -237,7 +256,7 @@ func (i Installer) prepare(ctx context.Context, plan Plan, root, artifact string
 		if err := os.Mkdir(extractRoot, 0o700); err != nil {
 			return "", err
 		}
-		found, err := extractTarGzip(artifact, extractRoot, "zsign")
+		found, err := extractTarGzip(ctx, artifact, extractRoot, "zsign")
 		if err != nil {
 			return "", err
 		}
@@ -287,19 +306,6 @@ root=${self%/*}
 exec "$root/squashfs-root/AppRun" "$@"
 `
 
-type execRunner struct{}
-
-func (execRunner) Run(ctx context.Context, executable string, args []string, directory string, environment []string) (string, error) {
-	command := exec.CommandContext(ctx, executable, args...)
-	command.Dir = directory
-	command.Env = append([]string(nil), environment...)
-	buffer := &limitedBuffer{remaining: maxDiagnosticBytes}
-	command.Stdout = buffer
-	command.Stderr = buffer
-	err := command.Run()
-	return buffer.String(), err
-}
-
 type limitedBuffer struct {
 	data      []byte
 	remaining int
@@ -332,7 +338,11 @@ func truncateDiagnostic(value string) string {
 	return value[:maxDiagnosticBytes] + "\n[diagnostic output truncated]"
 }
 
-func extractTarGzip(archive, destination, expected string) (string, error) {
+func extractTarGzip(ctx context.Context, archive, destination, expected string) (string, error) {
+	return extractTarGzipWithLimit(ctx, archive, destination, expected, maxExpandedBytes)
+}
+
+func extractTarGzipWithLimit(ctx context.Context, archive, destination, expected string, expansionLimit int64) (string, error) {
 	file, err := os.Open(archive)
 	if err != nil {
 		return "", err
@@ -343,7 +353,8 @@ func extractTarGzip(archive, destination, expected string) (string, error) {
 		return "", fmt.Errorf("open tar.gz: %w", err)
 	}
 	defer gz.Close()
-	reader := tar.NewReader(gz)
+	decompressed := &boundedContextReader{ctx: ctx, reader: gz, remaining: expansionLimit}
+	reader := tar.NewReader(decompressed)
 	seen := make(map[string]struct{})
 	var matches []string
 	var expanded int64
@@ -375,8 +386,8 @@ func extractTarGzip(archive, destination, expected string) (string, error) {
 				return "", err
 			}
 		case tar.TypeReg, tar.TypeRegA:
-			if header.Size < 0 || expanded > maxExpandedBytes-header.Size {
-				return "", fmt.Errorf("archive expands beyond %d bytes", maxExpandedBytes)
+			if header.Size < 0 || expanded > expansionLimit-header.Size {
+				return "", fmt.Errorf("archive expands beyond %d bytes", expansionLimit)
 			}
 			expanded += header.Size
 			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
@@ -405,8 +416,21 @@ func extractTarGzip(archive, destination, expected string) (string, error) {
 			return "", fmt.Errorf("archive entry %q has unsupported type %d", name, header.Typeflag)
 		}
 	}
-	if _, err := io.Copy(io.Discard, gz); err != nil {
-		return "", fmt.Errorf("verify gzip trailer: %w", err)
+	var trailing [32 << 10]byte
+	for {
+		count, readErr := decompressed.Read(trailing[:])
+		if count > 0 && !allZero(trailing[:count]) {
+			return "", errors.New("archive contains non-padding data after the tar end marker")
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return "", fmt.Errorf("verify gzip trailer: %w", readErr)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	if err := gz.Close(); err != nil {
 		return "", fmt.Errorf("verify gzip trailer: %w", err)
@@ -418,6 +442,41 @@ func extractTarGzip(archive, destination, expected string) (string, error) {
 		return "", err
 	}
 	return matches[0], nil
+}
+
+type boundedContextReader struct {
+	ctx       context.Context
+	reader    io.Reader
+	remaining int64
+}
+
+func (r *boundedContextReader) Read(buffer []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	if r.remaining <= 0 {
+		var probe [1]byte
+		count, err := r.reader.Read(probe[:])
+		if count > 0 {
+			return 0, fmt.Errorf("archive expands beyond configured limit")
+		}
+		return 0, err
+	}
+	if int64(len(buffer)) > r.remaining {
+		buffer = buffer[:r.remaining]
+	}
+	count, err := r.reader.Read(buffer)
+	r.remaining -= int64(count)
+	return count, err
+}
+
+func allZero(value []byte) bool {
+	for _, item := range value {
+		if item != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func safeArchiveName(name string) (string, error) {
@@ -449,6 +508,9 @@ func validateExistingInstall(plan Plan) (string, error) {
 		}
 		return "", fmt.Errorf("existing version is invalid: %w", err)
 	}
+	if err := validateInstallManifest(root); err != nil {
+		return "", fmt.Errorf("existing version is invalid: %w", err)
+	}
 	name, _ := expectedExecutable(plan.tool.ID, plan.asset.Format)
 	var executable string
 	if plan.asset.Format == "tar.gz" {
@@ -462,6 +524,14 @@ func validateExistingInstall(plan Plan) (string, error) {
 	}
 	if err := verifyExecutableWithin(root, executable); err != nil {
 		return "", fmt.Errorf("existing version is invalid: %w", err)
+	}
+	if plan.asset.Format == "binary" {
+		if ok, err := verifyFile(executable, plan.asset.Size, plan.asset.SHA256); err != nil || !ok {
+			if err == nil {
+				err = errors.New("binary executable differs from the pinned artifact")
+			}
+			return "", fmt.Errorf("existing version is invalid: %w", err)
+		}
 	}
 	if plan.asset.Format == "appimage" {
 		if err := verifyAppRunWithin(root, filepath.Join(root, "squashfs-root", "AppRun")); err != nil {
@@ -486,6 +556,12 @@ func findRegularBasename(root, basename string) ([]string, error) {
 }
 
 func activate(plan Plan, executable string) error {
+	if err := inspectDirectoryPath(plan.paths.BinDir, false); err != nil {
+		return err
+	}
+	if err := verifyPrivateTree(plan.paths.ToolsDir, plan.tool.ID, plan.tool.Version, plan.asset.OS+"-"+plan.asset.Arch); err != nil {
+		return err
+	}
 	if err := verifyExecutableWithin(plan.versionRoot(), executable); err != nil {
 		return err
 	}
@@ -594,20 +670,7 @@ func absoluteLinkTarget(link, target string) string {
 }
 
 func ensurePrivateDir(directory string) error {
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return fmt.Errorf("create private directory %s: %w", directory, err)
-	}
-	info, err := os.Lstat(directory)
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("private path is not a real directory: %s", directory)
-	}
-	if err := os.Chmod(directory, 0o700); err != nil {
-		return fmt.Errorf("protect private directory %s: %w", directory, err)
-	}
-	return nil
+	return inspectDirectoryPath(directory, true)
 }
 
 func ensurePrivateTree(root string, components ...string) error {
@@ -635,11 +698,17 @@ func ensurePrivateTree(root string, components ...string) error {
 }
 
 func verifyPrivateTree(root string, components ...string) error {
+	if err := inspectDirectoryPath(root, false); err != nil {
+		return err
+	}
 	current := root
 	for _, component := range components {
 		current = filepath.Join(current, component)
 		info, err := os.Lstat(current)
-		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		if err != nil {
+			return fmt.Errorf("inspect managed path component %s: %w", current, err)
+		}
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("managed path component is not a real directory: %s", current)
 		}
 	}

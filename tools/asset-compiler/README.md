@@ -7,7 +7,8 @@ compiler or bundle any Apple SDK files.
 
 ## Build and test
 
-Swift 6.3 is required, matching the pinned AssetKit manifest.
+Swift 6.3 and Linux are required, matching the pinned AssetKit manifest. The
+compile action explicitly refuses non-Linux hosts.
 
 ```sh
 swift build --package-path tools/asset-compiler -c release
@@ -37,8 +38,12 @@ errors. A host crash or storage failure during the short multi-file commit is
 not claimed to be a filesystem-wide atomic transaction.
 
 Catalog and app paths may not overlap. Direct symlink inputs, symlink output
-destinations, unsafe loose filenames, `_CodeSignature`, `CodeResources`, and
-`embedded.mobileprovision` are rejected. Run this command after `xtool dev
+destinations (including dangling links), nested catalog symlinks/special files,
+catalog filename traversal, unsafe loose filenames, `_CodeSignature`,
+`CodeResources`, and `embedded.mobileprovision` are rejected. Byte-identical
+loose icon outputs with the same AssetKit filename are coalesced. Conflicting
+idiom images that map to the same upstream loose filename are rejected with an
+explicit error. Run this command after `xtool dev
 build` creates an unsigned bundle and before zsign. It compiles resources only;
 it does not sign, authenticate with Apple, operate devices, upload, publish, or
 establish App Store acceptance.
