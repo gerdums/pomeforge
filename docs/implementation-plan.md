@@ -18,7 +18,7 @@ Create or import a distribution identity on Linux, obtain matching profiles, exp
 
 ## 5. Broader compatibility
 
-Add a packaged native window, distro packages, editor/LSP integration, device diagnostics, project import, and additional framework adapters only as their toolchains are verified. Keep unsupported paths visible. Add a stable MCP adapter if JSON CLI usage reveals a concrete need; the CLI already supports coding agents without vendor coupling.
+Add a packaged native window, distro packages, editor/LSP integration, device diagnostics, project import, and additional framework adapters only as their complete Linux toolchains are verified. Every build stage remains on Linux; hosted macOS is excluded. Keep unsupported paths visible. Add a stable MCP adapter if JSON CLI usage reveals a concrete need; the CLI already supports coding agents without vendor coupling.
 
 ## Completion evidence
 

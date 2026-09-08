@@ -5,7 +5,7 @@ Orchard provides a Linux CLI and graphical workspace for iPhone and iPad develop
 ## Product rules
 
 - Keep humans and agents on the same core operations. AI must remain optional.
-- Preserve the distinction between native Linux execution and any explicit hosted build provider.
+- Every build step must run on Linux. Never add a hosted Mac, remote Xcode, or Apple-hardware build fallback.
 - Use exact upstream CLI contracts. Consult `docs/upstream-command-reference.md` and recheck the pinned version before adding flags.
 - Development signing is not App Store distribution signing. Inspect profile type, entitlements, matching keys, bundle identity, and the exact artifact.
 - Never infer physical-device or App Store success from unit tests, web UI tests, or subprocess exit status alone.

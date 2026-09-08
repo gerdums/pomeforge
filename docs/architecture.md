@@ -6,7 +6,7 @@ The first supported project format is xtool's Swift Package Manager application.
 
 ## Product contract
 
-The intended primary path runs entirely on Linux, including SDK extraction, cross-compilation, signing, physical-device installation, IPA upload, and review submission. A Mac service must never be a hidden fallback. A future hosted builder, if offered, must be named and optional.
+The intended primary path runs entirely on Linux, including SDK extraction, cross-compilation, signing, physical-device installation, IPA upload, and review submission. Every build step must execute on Linux. Hosted macOS, remote Xcode, and Apple-hardware build services are excluded, including as optional fallbacks.
 
 Technical feasibility is separate from Apple's SDK license, Developer Program enrollment, account access, signing permissions, app eligibility, and App Review approval. Orchard cannot grant those. It will link the applicable upstream requirements and stop at missing prerequisites.
 

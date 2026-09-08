@@ -18,9 +18,9 @@ The components exist for a native pipeline: Swift and xtool compile a SwiftPM iO
 | Screenshots, logs, device interaction | pymobiledevice3 | Current versions support Linux userspace tunnels for iOS 17.4+ |
 | Upload IPA | ASC | Direct Go HTTP public `buildUploads`/`buildUploadFiles` workflow, no Transporter invocation |
 | Metadata and App Review submission | ASC plus App Store Connect website | API covers much of the work; account agreements and some declarations remain web workflows |
-| iOS Simulator, Xcode project build, Apple resource tools | Hosted macOS | No native Linux iOS Simulator is established by these tools |
+| iOS Simulator, arbitrary Xcode build phases, unsupported Apple resource tools | No supported adapter | Build a Linux replacement where feasible; never fall back to macOS |
 
-The user need not own or interact with a Mac when a hosted macOS worker is used. That is distinct from a pipeline whose every build stage executes on Linux. Orchard should identify the selected build provider and preserve that distinction in its receipts.
+The product requirement is strict: every build step executes on Linux. Remote or hosted macOS is outside scope. Operation receipts should record the Linux toolchain and environment that actually produced each artifact.
 
 ## Version pins
 
@@ -269,11 +269,11 @@ pymobiledevice3 developer core-device display start-video-stream evidence/captur
 
 The raw stream is length-prefixed RTP/HEVC, not an MP4 recording. The upstream `misc/rtp_dump.py` converts it to H.265. Expose recording only after that conversion and a playback check succeed. Coordinate gestures are not semantic accessibility assertions. Keep physical device testing evidence separate from unit tests, simulated tool transcripts and web dashboard screenshots. [CLI recipes](https://github.com/doronz88/pymobiledevice3/blob/v11.10.1/docs/guides/cli-recipes.md).
 
-## SDK license and hosted alternative
+## SDK license boundary
 
 Apple's currently published [Xcode and Apple SDKs Agreement](https://www.apple.com/legal/sla/docs/xcode.pdf) defines the SDKs as Apple Software. Its opening statement restricts execution to an Apple-branded product running macOS. Section 2.2.A limits installation to Apple-branded computers; section 2.5 prohibits separate SDK use and running parts on non-Apple hardware; section 2.7 restricts use and redistribution. Those are source terms, not an Orchard legal opinion about enforceability, exceptions or an individual user's additional agreements.
 
-Consequently, manually downloading Xcode and accepting its license does not by itself establish permission for the Linux route. Keep Apple's files out of public packages, provide the original terms in setup, and obtain appropriate licensing advice or permission before marketing a native SDK workflow as licensed. A user-facing hosted macOS provider can keep the full workflow in the Linux app while compiling and signing on appropriately provisioned Apple hardware. It must remain explicit and optional, not a hidden replacement for the user's requested Linux path.
+Consequently, manually downloading Xcode and accepting its license does not by itself establish permission for the Linux route. Keep Apple's files out of public packages, provide the original terms in setup, and obtain appropriate licensing advice or permission before marketing a native SDK workflow as licensed. This prerequisite does not change the technical product scope: Orchard must not add a macOS build service as a workaround. The entire build implementation remains on Linux.
 
 ## Recommended implementation order
 
@@ -284,4 +284,4 @@ Consequently, manually downloading Xcode and accepting its license does not by i
 5. Install the device artifact, launch it, retain screenshots/logs/recording when supported, and collect explicit user test observations.
 6. Upload the distribution artifact with ASC, retain exact Apple build/upload IDs and processing state, apply metadata, validate the App Store version, then request the final release approval.
 7. Verify the full route on Linux amd64 and arm64 with real iPhone and iPad hardware and one developer-owned app. Until that evidence exists, label native store delivery as an integration under validation.
-8. Add hosted macOS, broader resource compiler support, reproducible Linux packaging and additional framework adapters without implying those paths already work.
+8. Add broader Linux resource compiler support, reproducible Linux packaging and additional framework adapters without implying those paths already work. Hosted macOS is excluded.
