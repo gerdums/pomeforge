@@ -60,4 +60,4 @@ jobs:
       - name: Test complete AssetKit bridge suite
         run: swift test --package-path tools/asset-compiler --disable-automatic-resolution
       - name: Verify resolved dependencies were not rewritten
-        run: git diff --exit-code -- tools/asset-compiler/Package.resolved
+        run: git -c safe.directory="$GITHUB_WORKSPACE" diff --exit-code -- tools/asset-compiler/Package.resolved
