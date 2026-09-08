@@ -21,6 +21,9 @@ CHUNK = 1024 * 1024
 MAX_EXPANDED = 5 * 1024 ** 3
 MAX_MEMBERS = 10000
 RECEIPT = ".pomeforge-runtime.json"
+COMPATIBILITY_NAMES = ("libncurses.so.6", "libtinfo.so.6")
+COMPATIBILITY_DIRECTORY = "usr/lib/swift/linux"
+COMPATIBILITY_NOTICE = "POMEFORGE-NCURSES-COPYRIGHT.txt"
 
 
 def digest(path):
@@ -199,6 +202,73 @@ def extract_verified(archive_pathname, destination, expected_root):
     return records
 
 
+def compatibility_payload(arch, lock, bundle=None):
+    if "compatibility" not in lock:
+        raise RuntimeError("The runtime package has no compatibility pins.")
+    bundle = bundle or Path(__file__).resolve().parent.parent
+    manifest_path = bundle / "share/package-manifest.json"
+    info = manifest_path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_size > 8 * CHUNK:
+        raise RuntimeError("Invalid runtime package manifest.")
+    manifest = json.loads(manifest_path.read_text())
+
+    def verified_file(relative, mode, expected=None):
+        path = bundle / relative
+        info = path.lstat()
+        entry = manifest.get(relative)
+        if not isinstance(entry, dict) or not stat.S_ISREG(info.st_mode) or info.st_size > CHUNK or stat.S_IMODE(info.st_mode) != mode:
+            raise RuntimeError("Invalid bundled compatibility file: " + relative)
+        actual = {"sha256": digest(path), "size": info.st_size, "mode": mode}
+        if actual != entry or expected is not None and actual != expected:
+            raise RuntimeError("Bundled compatibility file integrity failed: " + relative)
+        return path
+
+    metadata_path = verified_file("libexec/runtime-compat/compatibility.json", 0o644)
+    metadata = json.loads(metadata_path.read_text())
+    compatibility = lock["compatibility"]
+    if metadata.get("id") != compatibility["id"] or metadata.get("architecture") != arch or set(metadata.get("libraries", {})) != set(COMPATIBILITY_NAMES):
+        raise RuntimeError("Bundled compatibility provenance does not match this compiler.")
+    if metadata.get("notice") != compatibility["notice"]:
+        raise RuntimeError("Bundled compatibility copyright does not match its pin.")
+    verified_file("libexec/runtime-compat/COPYRIGHT.txt", 0o644, metadata["notice"])
+    for name in COMPATIBILITY_NAMES:
+        entry = metadata["libraries"][name]
+        if entry.get("source") != compatibility["assets"][arch][name]:
+            raise RuntimeError("Bundled compatibility source does not match its pin.")
+        verified_file("libexec/runtime-compat/" + name, 0o644, entry.get("file"))
+    return bundle, metadata
+
+
+def install_compatibility(stage, records, payload):
+    bundle, metadata = payload
+    directory = stage
+    for component in COMPATIBILITY_DIRECTORY.split("/"):
+        directory = directory / component
+        if not stat.S_ISDIR(directory.lstat().st_mode):
+            raise RuntimeError("Swift compatibility destination is not a regular directory.")
+    files = [(COMPATIBILITY_DIRECTORY + "/" + name, name, metadata["libraries"][name]["file"]) for name in COMPATIBILITY_NAMES]
+    files.append((COMPATIBILITY_NOTICE, "COPYRIGHT.txt", metadata["notice"]))
+    for relative, name, expected in files:
+        destination = stage / relative
+        if relative in records or destination.exists() or destination.is_symlink():
+            raise RuntimeError("Swift archive already owns the compatibility destination.")
+        source = bundle / "libexec/runtime-compat" / name
+        copied = 0
+        checksum = hashlib.sha256()
+        with source.open("rb") as stream, destination.open("xb") as output:
+            for block in iter(lambda: stream.read(CHUNK), b""):
+                copied += len(block)
+                if copied > expected["size"]:
+                    raise RuntimeError("Bundled compatibility file changed during installation.")
+                checksum.update(block)
+                output.write(block)
+        destination.chmod(0o644)
+        if copied != expected["size"] or checksum.hexdigest() != expected["sha256"]:
+            raise RuntimeError("Bundled compatibility file changed during installation.")
+        records[relative] = {"type": "file", **expected}
+    return metadata
+
+
 def verify_tree(root, arch, lock):
     private_directory(root)
     receipt_path = root / RECEIPT
@@ -212,6 +282,17 @@ def verify_tree(root, arch, lock):
     records = receipt.get("files")
     if not isinstance(records, dict) or not records or len(records) > MAX_MEMBERS:
         raise RuntimeError("Invalid runtime file manifest.")
+    compatibility = receipt.get("compatibility")
+    if compatibility is not None:
+        pinned = lock.get("compatibility", {})
+        if compatibility.get("id") != pinned.get("id") or compatibility.get("architecture") != arch or set(compatibility.get("libraries", {})) != set(COMPATIBILITY_NAMES):
+            raise RuntimeError("Invalid runtime compatibility receipt.")
+        if compatibility.get("notice") != pinned.get("notice") or records.get(COMPATIBILITY_NOTICE) != {"type": "file", **pinned["notice"]}:
+            raise RuntimeError("Runtime compatibility copyright provenance changed.")
+        for name in COMPATIBILITY_NAMES:
+            entry = compatibility["libraries"][name]
+            if entry.get("source") != pinned["assets"][arch][name] or records.get(COMPATIBILITY_DIRECTORY + "/" + name) != {"type": "file", **entry["file"]}:
+                raise RuntimeError("Runtime compatibility provenance changed.")
     seen = set()
     for base, directories, files in os.walk(root, followlinks=False):
         for name in directories + files:
@@ -320,6 +401,7 @@ def main(argv):
             check_runtime(destination)
             print("Swift " + lock["version"] + " is already installed and verified.")
             return 0
+        payload = compatibility_payload(arch, lock)
         if shutil.disk_usage(parent).free < MAX_EXPANDED + lock["assets"][arch]["size"]:
             raise RuntimeError("Swift installation needs at least 6 GiB of free space.")
         with tempfile.TemporaryDirectory(prefix=".swift-download-", dir=parent) as temporary:
@@ -331,7 +413,8 @@ def main(argv):
             stage.mkdir(mode=0o700)
             print("Archive verified. Extracting the compiler and its license files.", flush=True)
             records = extract_verified(archive, stage, lock["assets"][arch]["root"])
-            receipt = {"version": lock["version"], "architecture": arch, "archiveSHA256": lock["assets"][arch]["sha256"], "files": records}
+            compatibility = install_compatibility(stage, records, payload)
+            receipt = {"version": lock["version"], "architecture": arch, "archiveSHA256": lock["assets"][arch]["sha256"], "files": records, "compatibility": compatibility}
             (stage / RECEIPT).write_text(json.dumps(receipt, sort_keys=True) + "\n")
             (stage / RECEIPT).chmod(0o600)
             verify_tree(stage, arch, lock)

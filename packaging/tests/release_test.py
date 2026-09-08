@@ -169,6 +169,89 @@ class ReleaseTests(unittest.TestCase):
         self.assertTrue(stage.is_dir())
         self.assertTrue(destination.is_dir())
 
+    def compatibility_fixture(self, lock):
+        bundle = self.root / "compatibility-bundle"
+        directory = bundle / "libexec/runtime-compat"
+        directory.mkdir(parents=True)
+        (bundle / "share").mkdir()
+        pins, libraries = {}, {}
+        for name in runtime.COMPATIBILITY_NAMES:
+            path = directory / name
+            path.write_bytes(("native-library-fixture-" + name).encode())
+            path.chmod(0o644)
+            source = {"package": name, "version": "fixture", "sha256": runtime.digest(path), "size": path.stat().st_size}
+            pins[name] = source
+            libraries[name] = {"source": source, "file": {"sha256": runtime.digest(path), "size": path.stat().st_size, "mode": 0o644}}
+        notice_path = directory / "COPYRIGHT.txt"
+        notice_path.write_bytes(b"Copyright fixture with permissive license")
+        notice_path.chmod(0o644)
+        notice = {"sha256": runtime.digest(notice_path), "size": notice_path.stat().st_size, "mode": 0o644}
+        lock["compatibility"] = {"id": "fixture-narrow", "assets": {"arm64": pins}, "notice": notice}
+        metadata = {"id": "fixture-narrow", "architecture": "arm64", "libraries": libraries, "notice": notice}
+        (directory / "compatibility.json").write_text(json.dumps(metadata))
+        (directory / "compatibility.json").chmod(0o644)
+        manifest = {path.relative_to(bundle).as_posix(): {"sha256": runtime.digest(path), "size": path.stat().st_size, "mode": 0o644} for path in directory.iterdir()}
+        (bundle / "share/package-manifest.json").write_text(json.dumps(manifest))
+        return bundle
+
+    def test_compatibility_is_private_receipted_and_preserves_old_runtime(self):
+        stage, lock = self.installed_fixture()
+        bundle = self.compatibility_fixture(lock)
+        # A valid older installation must remain accepted without being changed.
+        old_receipt = (stage / runtime.RECEIPT).read_bytes()
+        runtime.verify_tree(stage, "arm64", lock)
+        self.assertEqual((stage / runtime.RECEIPT).read_bytes(), old_receipt)
+        receipt = json.loads(old_receipt)
+        for relative in ("usr/lib", "usr/lib/swift", "usr/lib/swift/linux"):
+            (stage / relative).mkdir()
+            receipt["files"][relative] = {"type": "directory"}
+        swift_before = runtime.digest(stage / "usr/bin/swift")
+        payload = runtime.compatibility_payload("arm64", lock, bundle)
+        receipt["compatibility"] = runtime.install_compatibility(stage, receipt["files"], payload)
+        (stage / runtime.RECEIPT).write_text(json.dumps(receipt))
+        runtime.verify_tree(stage, "arm64", lock)
+        self.assertEqual(runtime.digest(stage / "usr/bin/swift"), swift_before)
+        self.assertEqual((stage / runtime.COMPATIBILITY_NOTICE).read_bytes(), b"Copyright fixture with permissive license")
+        library = stage / runtime.COMPATIBILITY_DIRECTORY / "libncurses.so.6"
+        self.assertTrue(library.is_file())
+        library.write_bytes(b"altered library")
+        with self.assertRaisesRegex(RuntimeError, "runtime changed"):
+            runtime.verify_tree(stage, "arm64", lock)
+
+    def test_compatibility_rejects_payload_and_provenance_changes(self):
+        _, lock = self.installed_fixture()
+        bundle = self.compatibility_fixture(lock)
+        path = bundle / "libexec/runtime-compat/libtinfo.so.6"
+        original = path.read_bytes()
+        path.write_bytes(b"altered library")
+        with self.assertRaisesRegex(RuntimeError, "integrity"):
+            runtime.compatibility_payload("arm64", lock, bundle)
+        path.write_bytes(original)
+        lock["compatibility"]["assets"]["arm64"]["libtinfo.so.6"]["version"] = "untrusted-version"
+        with self.assertRaisesRegex(RuntimeError, "source does not match"):
+            runtime.compatibility_payload("arm64", lock, bundle)
+
+    def test_compatibility_refuses_archive_destination_collision(self):
+        stage, lock = self.installed_fixture()
+        bundle = self.compatibility_fixture(lock)
+        directory = stage / runtime.COMPATIBILITY_DIRECTORY
+        directory.mkdir(parents=True)
+        destination = directory / "libncurses.so.6"
+        destination.write_bytes(b"archive-owned bytes")
+        with self.assertRaisesRegex(RuntimeError, "already owns"):
+            runtime.install_compatibility(stage, {}, runtime.compatibility_payload("arm64", lock, bundle))
+        self.assertEqual(destination.read_bytes(), b"archive-owned bytes")
+
+    def test_compatibility_refuses_symlink_destination_directory(self):
+        stage, lock = self.installed_fixture()
+        bundle = self.compatibility_fixture(lock)
+        outside = self.root / "outside-libraries"
+        outside.mkdir()
+        (stage / "usr/lib").symlink_to(outside)
+        with self.assertRaisesRegex(RuntimeError, "regular directory"):
+            runtime.install_compatibility(stage, {}, runtime.compatibility_payload("arm64", lock, bundle))
+        self.assertEqual(list(outside.iterdir()), [])
+
     def test_runtime_status_creates_no_state(self):
         home = self.root / "home"
         home.mkdir()

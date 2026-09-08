@@ -15,5 +15,73 @@
       "size": 1053213099,
       "root": "swift-6.3.3-RELEASE-ubuntu22.04-aarch64"
     }
+  },
+  "compatibility": {
+    "id": "ubuntu22-ncurses-6.3-2ubuntu0.3",
+    "packages": {
+      "amd64": {
+        "libncurses6": {
+          "url": "https://archive.ubuntu.com/ubuntu/pool/main/n/ncurses/libncurses6_6.3-2ubuntu0.3_amd64.deb",
+          "sha256": "38f97a45931ab6f296be017344afc45e5ccbf83f24896f79625318691a9bebf8",
+          "size": 111258,
+          "version": "6.3-2ubuntu0.3"
+        },
+        "libtinfo6": {
+          "url": "https://archive.ubuntu.com/ubuntu/pool/main/n/ncurses/libtinfo6_6.3-2ubuntu0.3_amd64.deb",
+          "sha256": "3b8dff43a31168f5020928f2ab9a97324c5b47ae708311781f6bd01306c96214",
+          "size": 104576,
+          "version": "6.3-2ubuntu0.3"
+        }
+      },
+      "arm64": {
+        "libncurses6": {
+          "url": "https://ports.ubuntu.com/ubuntu-ports/pool/main/n/ncurses/libncurses6_6.3-2ubuntu0.3_arm64.deb",
+          "sha256": "5a6fdc731d7c5f2c180de3367b8b482fe108369e5af3125104db4f8151fce9bc",
+          "size": 106486,
+          "version": "6.3-2ubuntu0.3"
+        },
+        "libtinfo6": {
+          "url": "https://ports.ubuntu.com/ubuntu-ports/pool/main/n/ncurses/libtinfo6_6.3-2ubuntu0.3_arm64.deb",
+          "sha256": "971b5fd1cf8f7d68ba00f40d8eec6474fae6a6adbe19883aa42dd2b74c672e4a",
+          "size": 103622,
+          "version": "6.3-2ubuntu0.3"
+        }
+      }
+    },
+    "assets": {
+      "amd64": {
+        "libncurses.so.6": {
+          "package": "libncurses6",
+          "version": "6.3-2ubuntu0.3",
+          "sha256": "2f6b3ec2f992420a349d54889453856fe0531de3fba0223fcef1b557d54c6321",
+          "size": 157776
+        },
+        "libtinfo.so.6": {
+          "package": "libtinfo6",
+          "version": "6.3-2ubuntu0.3",
+          "sha256": "856b8451914abc2277c3d91c64ba3e72b2e0d519806397afecae92fda1a6b10c",
+          "size": 200136
+        }
+      },
+      "arm64": {
+        "libncurses.so.6": {
+          "package": "libncurses6",
+          "version": "6.3-2ubuntu0.3",
+          "sha256": "578fe9a120803b998a13dbba76c28bf0cafb435f53c8713361ba6e17bacb843f",
+          "size": 149360
+        },
+        "libtinfo.so.6": {
+          "package": "libtinfo6",
+          "version": "6.3-2ubuntu0.3",
+          "sha256": "bed3a0938f5f6911dcbb83b02a9f9edc493990405d71fd84b4ad9130aab57f2c",
+          "size": 195784
+        }
+      }
+    },
+    "notice": {
+      "sha256": "f0974fb41778e23c94111ff90da0546de8971f8270c58877283d372e6bd7f17e",
+      "size": 4670,
+      "mode": 420
+    }
   }
 }

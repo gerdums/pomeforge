@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import urllib.request
 
 UNXIP_REVISION = "6c3990517fcc4c1db6952fccf4c562fb14097601"
 UNXIP_VERSION = "3.3.0"
@@ -70,6 +71,54 @@ def bundle_manifest(bundle):
         elif path.is_file():
             files[relative] = {"sha256": sha256(path), "mode": path.stat().st_mode & 0o777, "size": path.stat().st_size}
     write_file(bundle / "share/package-manifest.json", json.dumps(files, indent=2, sort_keys=True) + "\n")
+
+
+def bundle_compatibility(bundle, arch, lock):
+    compatibility = lock["compatibility"]
+    triplet = {"amd64": "x86_64-linux-gnu", "arm64": "aarch64-linux-gnu"}[arch]
+    pins = compatibility["assets"][arch]
+    metadata = {"id": compatibility["id"], "architecture": arch, "libraries": {}, "notice": compatibility["notice"]}
+    notice = Path(__file__).resolve().parents[2] / "docs/third-party/ncurses-COPYRIGHT.txt"
+    if sha256(notice) != compatibility["notice"]["sha256"] or notice.stat().st_size != compatibility["notice"]["size"]:
+        raise RuntimeError("The ncurses copyright notice does not match its pin.")
+    copy_file(notice, bundle / "libexec/runtime-compat/COPYRIGHT.txt")
+    for name in ("libncurses.so.6", "libtinfo.so.6"):
+        pin = pins[name]
+        destination = bundle / "libexec/runtime-compat" / name
+        package = compatibility["packages"][arch][pin["package"]]
+        with tempfile.TemporaryDirectory(prefix="pomeforge-ncurses-") as temporary:
+            temporary = Path(temporary)
+            archive = temporary / "library.deb"
+            with urllib.request.urlopen(package["url"], timeout=60) as response, archive.open("xb") as target:
+                if not response.geturl().startswith("https://"):
+                    raise RuntimeError("Compatibility package redirected away from HTTPS.")
+                contents = response.read(package["size"] + 1)
+                target.write(contents)
+            if archive.stat().st_size != package["size"] or sha256(archive) != package["sha256"]:
+                raise RuntimeError("Compatibility package integrity check failed.")
+            extracted = temporary / "extracted"
+            run(["dpkg-deb", "--extract", archive, extracted])
+            original = extracted / "lib" / triplet / (name + ".3")
+            if original.stat().st_size != pin["size"] or sha256(original) != pin["sha256"]:
+                raise RuntimeError("The ncurses library does not match its pinned Ubuntu payload: " + name)
+            copy_file(original, destination)
+        if name == "libncurses.so.6":
+            # RUNPATH is not inherited by indirect dependencies. Keep its
+            # matching tinfo dependency beside this private copy.
+            run(["patchelf", "--set-rpath", "$ORIGIN", destination])
+            if run(["patchelf", "--print-rpath", destination]) != "$ORIGIN":
+                raise RuntimeError("Private ncurses RUNPATH was not applied.")
+        with destination.open("rb") as stream:
+            elf = stream.read(20)
+        machine = {"amd64": 62, "arm64": 183}[arch]
+        if elf[:6] != b"\x7fELF\x02\x01" or int.from_bytes(elf[18:20], "little") != machine:
+            raise RuntimeError("Compatibility library architecture mismatch.")
+        versions = set(re.findall(r"\bGLIBC_([0-9]+(?:\.[0-9]+)+)", run(["readelf", "--version-info", destination])))
+        if not versions or any(tuple(map(int, version.split("."))) > (2, 35) for version in versions):
+            raise RuntimeError("Compatibility library exceeds the glibc 2.35 baseline.")
+        metadata["libraries"][name] = {"source": pin, "file": {"sha256": sha256(destination), "size": destination.stat().st_size, "mode": 0o644}, "abi": {"machine": machine, "maximumGlibc": max(versions, key=lambda value: tuple(map(int, value.split("."))))}}
+    write_file(bundle / "libexec/runtime-compat/compatibility.json", json.dumps(metadata, indent=2, sort_keys=True) + "\n")
+    return metadata
 
 
 def tar_gz(source, output, epoch):
@@ -171,7 +220,7 @@ def main():
     if git(source, "status", "--porcelain"):
         raise RuntimeError("Commit all source changes before building release packages.")
     epoch = int(git(source, "show", "-s", "--format=%ct", "HEAD"))
-    for name in ("go", "git", "strip", "ldd", "readelf", "dpkg-deb", "rpmbuild", "tar", "zstd"):
+    for name in ("go", "git", "strip", "ldd", "readelf", "dpkg-deb", "patchelf", "rpmbuild", "tar", "zstd"):
         if not shutil.which(name):
             raise RuntimeError("Missing release build dependency: " + name)
     environment = dict(os.environ, GOTOOLCHAIN="local", CGO_ENABLED="0", GOOS="linux", GOARCH=args.arch, SOURCE_DATE_EPOCH=str(epoch))
@@ -192,6 +241,7 @@ def main():
         temporary = Path(temporary_name)
         bundle = temporary / ("pomeforge-" + args.version + "-linux-" + args.arch)
         (bundle / "libexec").mkdir(parents=True)
+        compatibility = bundle_compatibility(bundle, args.arch, json.loads((source / "packaging/release/runtime-lock.json").read_text()))
         run(["go", "build", "-trimpath", "-buildvcs=false", "-o", bundle / "libexec/pomeforge", "./cmd/pomeforge"], cwd=source, env=environment)
         if run([bundle / "libexec/pomeforge", "version"]) != "Pomeforge " + args.version:
             raise RuntimeError("Built CLI reports the wrong version.")
@@ -264,7 +314,7 @@ def main():
         tar_gz(bundle, output_dir / filenames[3], epoch)
         hashes = {name: sha256(output_dir / name) for name in filenames}
         write_file(output_dir / ("SHA256SUMS-" + args.arch), "".join(value + "  " + name + "\n" for name, value in hashes.items()))
-        provenance = {"sourceRevision": revision, "version": args.version, "architecture": args.arch, "go": go_version, "swift": swift_version, "swiftImage": SWIFT_IMAGE, "unxipRevision": UNXIP_REVISION, "assetCompilerResolvedSHA256": resolved_hash, "staticSwiftStdlib": True, "helperDependencies": dependencies, "helperABI": helper_abi, "artifacts": hashes, "buildOS": "Linux"}
+        provenance = {"sourceRevision": revision, "version": args.version, "architecture": args.arch, "go": go_version, "swift": swift_version, "swiftImage": SWIFT_IMAGE, "unxipRevision": UNXIP_REVISION, "assetCompilerResolvedSHA256": resolved_hash, "staticSwiftStdlib": True, "helperDependencies": dependencies, "helperABI": helper_abi, "runtimeCompatibility": compatibility, "artifacts": hashes, "buildOS": "Linux"}
         write_file(output_dir / ("provenance-" + args.arch + ".json"), json.dumps(provenance, indent=2) + "\n")
     print("Built " + ", ".join(filenames))
 

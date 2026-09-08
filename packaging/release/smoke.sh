@@ -45,6 +45,9 @@ case $pomeforge_distro in
     ;;
   fedora)
     dnf install --assumeyes "/packages/pomeforge-${pomeforge_version}-1.${pomeforge_machine}.rpm"
+    # The minimal Fedora image omits runuser, which this test harness uses to
+    # switch to the normal account. It is not a Pomeforge runtime dependency.
+    dnf install --assumeyes util-linux
     ;;
   arch)
     pacman -Syu --noconfirm
@@ -78,10 +81,22 @@ for tool in ('swift', 'clang', 'xtool', 'pomeforge-assets', 'unxip'):
 result = subprocess.run([by_id['swift']['path'], 'package', '--package-path', str(Path.home() / 'HelloWorld'), 'dump-package'], capture_output=True, text=True, timeout=120)
 assert result.returncode == 0, result.stderr
 assert json.loads(result.stdout)['name'] == 'HelloWorld'
+# Exercise SwiftPM's normal build engine and linker as well as manifest parsing.
+# This host-only fixture needs no Apple SDK and is distinct from an iOS build.
+compiler_smoke = Path.home() / 'CompilerSmoke'
+compiler_smoke.mkdir()
+for arguments in (
+    ['package', 'init', '--type', 'executable', '--name', 'CompilerSmoke'],
+    ['build'],
+):
+    result = subprocess.run([by_id['swift']['path'], *arguments], cwd=compiler_smoke, capture_output=True, text=True, timeout=180)
+    assert result.returncode == 0, result.stderr
+result = subprocess.run([str(compiler_smoke / '.build/debug/CompilerSmoke')], capture_output=True, text=True, timeout=10)
+assert result.returncode == 0 and result.stdout.strip() == 'Hello, world!', result.stderr
 # An AI caller receives a structured error, never an unattended prompt.
 result = subprocess.run(['pomeforge', 'quickstart', '--json'], capture_output=True, text=True, timeout=10)
 assert result.returncode != 0
 assert json.loads(result.stdout)['error']['code'] == 'interactive_required'
-print('PASS: native package, first-run Swift download, helper registration, pinned xtool, project generation, SwiftPM host manifest, noninteractive boundary')
+print('PASS: native package, first-run Swift download, helper registration, pinned xtool, project generation, SwiftPM host build and execution, noninteractive boundary')
 PY
 USER_CHECKS
