@@ -2,7 +2,13 @@
 
 Pomeforge 0.1.0 targets Linux amd64 and arm64 with `.deb`, `.rpm`, Arch packages and portable archives. The prebuilt helpers target glibc 2.35 or newer and the GCC 12 C++ runtime (`GLIBCXX_3.4.30`). Packages include the CLI, asset compiler and unxip; first run downloads the pinned Swift 6.3.3 Ubuntu 22.04 toolchain. Apple SDKs remain operator-supplied. A matching libc version alone does not establish full distribution compatibility.
 
-## 0.1.0 package candidate evidence
+## 0.1.0 release checks
+
+Public source `f9c899039193fde07b60291e479a8ee8aa7f39a6` passed [both native package builds and all nine fresh distribution jobs](https://github.com/gerdums/pomeforge/actions/runs/34289230791). Each fresh job installed its native package, downloaded the pinned Swift runtime as a normal user, installed xtool, registered helpers, generated the SwiftUI starter and passed tool discovery. It also compiled and ran a separate native Swift Hello World executable. These jobs did not import an Apple SDK or compile iOS code.
+
+The release supplies private, pinned ncurses/tinfo libraries for Swift; this resolves the missing legacy ncurses library on Arch and incompatible symbol-version behavior on Fedora. These files are installed inside the user runtime and retain their license notice. No system library replacement is required.
+
+## Earlier 0.1.0 candidate evidence
 
 The following checks used `33c8aad`, before the later runtime archive-containment correction. Exact hashes and source boundaries are in [verification.md](verification.md).
 
@@ -14,15 +20,15 @@ The following checks used `33c8aad`, before the later runtime archive-containmen
 | Complete guided local setup | Fresh Linux arm64 quickstart passed in 192.807 seconds, including the official runtime download, supplied full-XIP SDK import, six metadata-source hash checks and HelloWorld compilation; no Apple account/device operation |
 | Generated debug app | Actual iPhoneOS 26.5 SDK selected; arm64 executable produced. Its debug Mach-O stamps minimum iOS 17 / SDK 17, so this run does not prove release metadata or Store readiness |
 
-The release workflow defines native GitHub package builds for amd64/arm64 and nine fresh distribution/architecture smoke jobs. Their results remain pending; [GitHub Actions](https://github.com/gerdums/pomeforge/actions) is the live record. Native amd64 iOS compilation, native Omarchy desktop behavior, physical USB access and Apple outcomes remain separate acceptance gates.
+The current native package and host Swift checks are recorded above. Native amd64 iOS compilation, native Omarchy desktop behavior, physical USB access and Apple outcomes remain separate acceptance gates.
 
 ## Distribution targets
 
 | Target | Package and baseline | Evidence boundary |
 | --- | --- | --- |
-| Ubuntu 22.04/24.04; Debian 12/13 | `.deb`, amd64/arm64; glibc ≥2.35 and libstdc++ ≥12 | Native arm64 Jammy build, Ubuntu 24.04 container desktop and separate Linux arm64 quickstart evidence above; GitHub Ubuntu 22.04 and Debian smoke results pending |
-| Fedora | `.rpm`, amd64/arm64; compatible glibc/C++ runtime and package dependencies | Fedora 44 container smoke is configured; host SELinux, desktop and USB behavior unproved |
-| Arch / Omarchy | Arch package or portable archive; compatible runtime plus `libxml2-legacy` | Native amd64 Arch smoke is configured; native Omarchy and host USB/udev behavior unproved. Earlier QEMU results below are retained separately |
+| Ubuntu 22.04/24.04; Debian 12/13 | `.deb`, amd64/arm64; glibc ≥2.35 and libstdc++ ≥12 | Fresh Ubuntu 22.04, Debian 12 and Debian 13 package/toolchain/native Swift smoke passed on amd64 and arm64; separate Ubuntu 24.04 container desktop evidence and Ubuntu 22.04 arm64 iOS quickstart evidence above |
+| Fedora | `.rpm`, amd64/arm64; compatible glibc/C++ runtime and package dependencies | Fresh Fedora 44 package/toolchain/native Swift smoke passed on amd64 and arm64; host SELinux, desktop and USB behavior unproved |
+| Arch / Omarchy | Arch package or portable archive; compatible runtime plus `libxml2-legacy` | Fresh native amd64 Arch package/toolchain/Swift smoke passed; native Omarchy, Arch arm64 and host USB/udev behavior unproved. Earlier QEMU results below are retained separately |
 | Other glibc distributions | Portable amd64/arm64 archive with required distro libraries | Portable installation passed on Linux arm64; verify the target's shared-library versions, desktop opener and device services |
 | Alpine / other musl distributions | A compatible local Linux container | Bundled Swift helpers target glibc; the static Go CLI alone does not establish a complete musl workflow |
 | Other CPU architectures | No 0.1.0 binary asset | Upstream iOS toolchains may not supply compatible host binaries |
@@ -40,7 +46,7 @@ The core and release results use product source at `4171935b3230da04bf35ba69ba04
 | Apple SDK import | Swift 6.3.3, Linux arm64; operator-supplied Xcode 26.6 XIP | Fresh full-XIP import passed in 122.561 seconds using default unxip extraction; six original metadata files, nine values and the selected Swift SDK configuration were verified |
 | SwiftUI release build | Same Linux arm64 environment; actual iPhoneOS 26.5 SDK | Generated project compiled in 40.386 seconds; Mach-O records minimum iOS 17.0 and SDK 26.5, with matching SDK-derived release metadata |
 | Assets and IPA export | Same Linux arm64 environment; real AssetKit and zsign 1.1.2, synthetic identity and explicit fixture trust root | Full native run passed 27 checks, including icon generation, release build, export and IPA inspection; 18 icon slots produced 15 PNG files plus `Assets.car`, and the unsigned source bundle was preserved |
-| Go 1.24.13 amd64 executable | Arch Linux amd64 under QEMU | Project generation crashed during PNG encoding; the failure is retained and native amd64 behavior remains unproved |
+| Go 1.24.13 amd64 executable | Arch Linux amd64 under QEMU | Project generation crashed during PNG encoding; the failure is retained; current native amd64 project generation and host Swift checks passed separately above |
 | Separate Go 1.27.1 amd64 executable | Same emulated Arch environment; binary hash beginning `cb2bb545` | Project generation and a correctly blocked build plan passed; iOS compilation was not exercised, and the Go 1.24.13 failure remains recorded |
 | Installed desktop entry | Debian GIO 2.74.6 and Ubuntu GIO 2.80.0 | Independent review, 25 Node tests and container contracts passed; actual Ubuntu GIO launched the installed app from a special-character path and Chromium created a real project; screenshot and 2.12-second video retained |
 | Physical iPhone/iPad | Pending Linux device access | Pairing, provisioning, installation, launch and recorded interaction remain unproved |

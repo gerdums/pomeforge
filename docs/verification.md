@@ -1,6 +1,28 @@
 # Verification record
 
-## 0.1.0 package candidate evidence
+## Published 0.1.0 source and Linux checks
+
+The release packages were built from public source `f9c899039193fde07b60291e479a8ee8aa7f39a6`. Subsequent documentation updates record the results without changing those artifacts. All compilation, packaging, installation and runtime checks below ran in Linux.
+
+[Release build 34289230791](https://github.com/gerdums/pomeforge/actions/runs/34289230791) passed both native package builds and all nine fresh installation jobs. [CI 34289220074](https://github.com/gerdums/pomeforge/actions/runs/34289220074) passed Go tests/vet, web and packaging tests, and the Swift asset-compiler checks.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Native release packages | Native Linux amd64 and arm64; Go 1.24.13 and Swift 6.3.3 on Ubuntu 22.04 | All eight `.deb`, `.rpm`, Arch and portable packages built |
+| Fresh native package and toolchain setup | Ubuntu 22.04, Debian 12, Debian 13 and Fedora 44 on amd64 and arm64; Arch on amd64 | All nine passed: dependencies installed, normal-user pinned Swift and xtool installation, helper discovery, HelloWorld generation and doctor checks |
+| Swift compiler and package manager | Each of the same nine fresh environments | Parsed the generated SwiftUI project's package manifest, then compiled and ran a separate native Swift Hello World executable; these checks do not compile iOS code |
+| Runtime and portable installer regression checks | Linux; 21 focused tests | Passed archive containment, existing-install preservation, compatibility-library integrity and license retention checks |
+| Downloaded release-file inspection | All eight final GitHub-built packages, inspected on Linux | Checksums, native metadata, all 40 bundle-manifest entries, ELF architecture, cross-format file identity, 19 license files, corresponding unxip source and private compatibility-library pins/ABI passed |
+| Final packaged quickstart resume | Final ARM64 `.deb`, normal-user Ubuntu 22.04 terminal, existing SDK/runtime/project | Passed in 8.057 seconds and rebuilt the SwiftUI starter; all 23 project source files, bundle identifier, SDK metadata and runtime receipt preserved. This reused the pre-compatibility runtime; fresh runtime installation is established separately by the nine distro jobs |
+| Final installed desktop flows | Exact final ARM64 `.deb`, fresh normal-user Ubuntu 24.04 desktop state, GIO/xterm/Chromium | Passed complete installed-payload verification, actual Setup consent/download-decline/terminal-close flow, Workspace menu launch and authenticated HelloWorld creation; four screenshots and 3.75-second setup / 1.88-second workspace videos retained |
+
+The final compatibility change also passed independent review with no findings. Its reviewed private revision `66217f5109263d5317648f58cf5bc97d3fc0816b` matches all 147 product paths, contents and executable modes at the public release source; documentation and private orchestration history are separate.
+
+The final ARM64 `.deb` SHA-256 is `247ff08676f62283e8cbef9f456eac0561018c681a4fc58f40ca6b329ecced1d`; the amd64 `.deb` is `322080bb670e0e3167cf33fd950020d30fb052f6ed94a6aaa5f1c34a5810c314`. The release's `SHA256SUMS` covers all eight packages and both provenance files.
+
+The runtime includes private, version-pinned ncurses/tinfo libraries to support the official Swift toolchain on Fedora and Arch. Their upstream Ubuntu binary-package pins, resulting hashes, architecture and ABI checks are recorded in the release provenance. The libraries are bundled with Pomeforge and copied into new user runtimes; the system compiler and libraries are not replaced.
+
+## Earlier 0.1.0 candidate evidence
 
 These checks used candidate `33c8aadfe222c6b29501162eaf77345829068d7f`, before the later runtime archive-containment correction. They establish the recorded candidate behavior, not a later artifact by implication. All builds, installation, terminal interaction and browser automation ran in Linux.
 
@@ -16,9 +38,9 @@ The tested `.deb` SHA-256 is `a1c9029dbb08cd66dec942c12869c77eaf2ea6bc270ccb7516
 
 ## Current coverage and outstanding checks
 
-The release workflow defines native GitHub amd64 and arm64 package builds plus nine fresh distribution/architecture smoke jobs: Ubuntu 22.04, Debian 12, Debian 13 and Fedora 44 on both architectures, and Arch on amd64. Those jobs exercise package installation, pinned Swift/xtool setup, helper discovery, project generation and a SwiftPM host manifest. Their results are pending; consult [GitHub Actions](https://github.com/gerdums/pomeforge/actions). They do not test iOS compilation, a graphical host session or USB access.
+The fresh distribution checks above establish native package installation and host Swift compilation. They do not establish iOS compilation, a graphical host session or USB access on each distribution.
 
-Native amd64 package/toolchain results remain pending that workflow; native amd64 iOS compilation is a separate gap. Native Omarchy desktop behavior, host USB/udev permissions, Fedora SELinux behavior, physical iPhone/iPad installation and interaction, a real Apple distribution identity, upload processing, TestFlight and App Review still need direct proof. Container checks do not establish these host or Apple outcomes.
+Native amd64 iOS compilation remains a separate gap. Native Omarchy desktop behavior, host USB/udev permissions, Fedora SELinux behavior, physical iPhone/iPad installation and interaction, a real Apple distribution identity, upload processing, TestFlight and App Review still need direct proof. Container checks do not establish these host or Apple outcomes.
 
 ## Historical foundation evidence
 
