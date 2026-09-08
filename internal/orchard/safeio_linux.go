@@ -12,13 +12,15 @@ import (
 	"syscall"
 )
 
-// openRegularWithin walks from an already selected root using no-follow
-// directory descriptors, then opens a nonblocking regular file. This keeps a
-// concurrent symlink or special-file replacement from escaping or blocking the
-// caller between an earlier path check and open.
-func openRegularWithin(root, target string, flags int, perm uint32) (*os.File, error) {
+func relativePathParts(root, target string, allowRoot bool) ([]string, error) {
 	rel, err := filepath.Rel(root, target)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil, errors.New("file must remain below its selected root")
+	}
+	if rel == "." {
+		if allowRoot {
+			return []string{}, nil
+		}
 		return nil, errors.New("file must remain below its selected root")
 	}
 	parts := strings.Split(rel, string(filepath.Separator))
@@ -27,12 +29,26 @@ func openRegularWithin(root, target string, flags int, perm uint32) (*os.File, e
 			return nil, errors.New("invalid file path")
 		}
 	}
+	return parts, nil
+}
 
-	fd, err := syscall.Open(root, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+// openDirectoryAbsolute acquires every component from the filesystem root with
+// O_NOFOLLOW. A rename can leave the caller on the directory it already opened,
+// but replacing any not-yet-opened ancestor with a symlink cannot redirect it.
+func openDirectoryAbsolute(path string) (*os.File, error) {
+	clean := filepath.Clean(path)
+	if !filepath.IsAbs(clean) {
+		return nil, errors.New("directory path must be absolute")
+	}
+	fd, err := syscall.Open(string(filepath.Separator), syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, err
 	}
-	for _, part := range parts[:len(parts)-1] {
+	parts := strings.Split(strings.TrimPrefix(clean, string(filepath.Separator)), string(filepath.Separator))
+	if clean == string(filepath.Separator) {
+		parts = nil
+	}
+	for _, part := range parts {
 		next, openErr := syscall.Openat(fd, part, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
 		_ = syscall.Close(fd)
 		if openErr != nil {
@@ -40,8 +56,60 @@ func openRegularWithin(root, target string, flags int, perm uint32) (*os.File, e
 		}
 		fd = next
 	}
+	return os.NewFile(uintptr(fd), clean), nil
+}
+
+// openDirectoryWithin starts from an already safely acquired canonical root
+// descriptor and opens target one component at a time without following links.
+func openDirectoryWithin(root, target string) (*os.File, error) {
+	parts, err := relativePathParts(root, target, true)
+	if err != nil {
+		return nil, err
+	}
+	rootDirectory, err := openDirectoryAbsolute(root)
+	if err != nil {
+		return nil, err
+	}
+	defer rootDirectory.Close()
+	fd, err := syscall.Openat(int(rootDirectory.Fd()), ".", syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, err
+	}
+	for _, part := range parts {
+		next, openErr := syscall.Openat(fd, part, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+		_ = syscall.Close(fd)
+		if openErr != nil {
+			return nil, openErr
+		}
+		fd = next
+	}
+	return os.NewFile(uintptr(fd), target), nil
+}
+
+// openRegularWithin acquires the selected root component-by-component, then
+// walks to a nonblocking regular file using no-follow directory descriptors.
+func openRegularWithin(root, target string, flags int, perm uint32) (*os.File, error) {
+	parts, err := relativePathParts(root, target, false)
+	if err != nil {
+		return nil, err
+	}
+	directory, err := openDirectoryAbsolute(root)
+	if err != nil {
+		return nil, err
+	}
+	fd := int(directory.Fd())
+	for _, part := range parts[:len(parts)-1] {
+		nextName := filepath.Join(directory.Name(), part)
+		next, openErr := syscall.Openat(fd, part, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+		_ = directory.Close()
+		if openErr != nil {
+			return nil, openErr
+		}
+		directory = os.NewFile(uintptr(next), nextName)
+		fd = next
+	}
 	fileFD, err := syscall.Openat(fd, parts[len(parts)-1], flags|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, perm)
-	_ = syscall.Close(fd)
+	_ = directory.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -65,16 +133,24 @@ func openRegularAbsolute(path string) (*os.File, error) {
 	return openRegularWithin(string(filepath.Separator), clean, syscall.O_RDONLY, 0)
 }
 
+func walkRegularFilesInProject(ctx context.Context, workspace, project string, skipRootDirectories map[string]bool, visit func(string, *os.File) error) error {
+	projectDirectory, err := openDirectoryWithin(workspace, project)
+	if err != nil {
+		return err
+	}
+	return walkRegularDirectory(ctx, projectDirectory, "", skipRootDirectories, visit)
+}
+
 // walkRegularFilesWithin enumerates an already selected root through open
 // directory descriptors. Each child is opened relative to its parent with
 // O_NOFOLLOW, so renaming a visited directory and replacing its pathname with
 // a symlink cannot redirect traversal outside root.
 func walkRegularFilesWithin(ctx context.Context, root string, skipRootDirectories map[string]bool, visit func(string, *os.File) error) error {
-	rootFD, err := syscall.Open(root, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	rootDirectory, err := openDirectoryAbsolute(root)
 	if err != nil {
 		return err
 	}
-	return walkRegularDirectory(ctx, os.NewFile(uintptr(rootFD), root), "", skipRootDirectories, visit)
+	return walkRegularDirectory(ctx, rootDirectory, "", skipRootDirectories, visit)
 }
 
 func walkRegularDirectory(ctx context.Context, directory *os.File, prefix string, skipRootDirectories map[string]bool, visit func(string, *os.File) error) error {

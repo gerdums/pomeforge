@@ -45,6 +45,14 @@ func TestProcessHelper(t *testing.T) {
 			os.Exit(11)
 		}
 		fmt.Fprint(os.Stdout, "operation output survived")
+	case "redirect-project-ancestor":
+		if err := os.Rename(os.Args[separator+2], os.Args[separator+3]); err != nil {
+			os.Exit(12)
+		}
+		if err := os.Symlink(os.Args[separator+4], os.Args[separator+2]); err != nil {
+			os.Exit(13)
+		}
+		fmt.Fprint(os.Stdout, "operation output survived ancestor replacement")
 	case "sleep":
 		time.Sleep(250 * time.Millisecond)
 		fmt.Fprint(os.Stdout, "done")
@@ -270,6 +278,47 @@ func TestExecutorReturnsResultWithPostOperationHistoryFailure(t *testing.T) {
 	}
 	if result.ID == "" || coded.Result.ID != result.ID || coded.Result.Status != "succeeded" || !strings.Contains(coded.Result.Output, "operation output survived") {
 		t.Fatalf("completed result was not preserved: result=%#v error=%#v", result, coded)
+	}
+}
+
+func TestHistoryAppendRejectsProjectAncestorReplacedByCompletedOperation(t *testing.T) {
+	workspace := t.TempDir()
+	project, err := CreateProject(workspace, filepath.Join("nested", "Demo"), "Demo", "com.example.Demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	outsideProject := filepath.Join(outside, "Demo")
+	outsideHistoryDirectory := filepath.Join(outsideProject, ".orchard")
+	if err := os.MkdirAll(outsideHistoryDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outsideHistory := filepath.Join(outsideHistoryDirectory, "history.jsonl")
+	if err := os.WriteFile(outsideHistory, []byte("preserve\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ancestor := filepath.Join(workspace, "nested")
+	parked := filepath.Join(workspace, "opened-nested")
+	plan := helperPlan(project.Path, "redirect-project-ancestor")
+	plan.Steps[0].Args = append(plan.Steps[0].Args, ancestor, parked, outside)
+
+	result, err := (&Executor{Workspace: workspace, Timeout: 5 * time.Second}).Execute(context.Background(), plan, project.Path, false)
+	if err == nil {
+		t.Fatal("expected history persistence failure after ancestor replacement")
+	}
+	var coded *CodedError
+	if !errors.As(err, &coded) || coded.Code != "history_failed" || coded.Result == nil {
+		t.Fatalf("history error did not preserve the operation result: %#v", err)
+	}
+	if result.Status != "succeeded" || !strings.Contains(result.Output, "operation output survived") {
+		t.Fatalf("completed operation result was discarded: %#v", result)
+	}
+	contents, readErr := os.ReadFile(outsideHistory)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(contents) != "preserve\n" {
+		t.Fatalf("outside history was modified: %q", contents)
 	}
 }
 

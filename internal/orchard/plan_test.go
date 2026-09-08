@@ -420,6 +420,45 @@ func TestNoFollowTraversalKeepsOpenedDirectoryAfterPathReplacement(t *testing.T)
 	}
 }
 
+func TestFingerprintTraversalRejectsReplacedProjectAncestorAfterResolution(t *testing.T) {
+	workspace := t.TempDir()
+	project, err := CreateProject(workspace, filepath.Join("nested", "Demo"), "Demo", "com.example.Demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := ResolveWithin(workspace, project.Path, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	outsideProject := filepath.Join(outside, "Demo")
+	if err := os.Mkdir(outsideProject, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outsideProject, "outside-secret"), []byte("must-not-visit"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ancestor := filepath.Join(workspace, "nested")
+	if err := os.Rename(ancestor, filepath.Join(workspace, "opened-nested")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, ancestor); err != nil {
+		t.Fatal(err)
+	}
+
+	visited := []string{}
+	err = walkRegularFilesInProject(context.Background(), workspace, resolved, map[string]bool{}, func(relative string, _ *os.File) error {
+		visited = append(visited, relative)
+		return nil
+	})
+	if err == nil {
+		t.Fatalf("replaced ancestor was accepted; visited %v", visited)
+	}
+	if strings.Contains(strings.Join(visited, " "), "outside-secret") {
+		t.Fatalf("fingerprint traversal escaped through replaced ancestor: %v", visited)
+	}
+}
+
 func TestPlanRejectsProjectSymlink(t *testing.T) {
 	workspace, project := testProject(t, AppStoreIDs{})
 	if err := os.Symlink(filepath.Join(project, "Package.swift"), filepath.Join(project, "linked.swift")); err != nil {

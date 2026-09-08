@@ -25,7 +25,7 @@ func NewService(workspace string, tools ToolResolver) (*Service, error) {
 	if tools == nil {
 		tools = SystemToolResolver{}
 	}
-	service := &Service{Workspace: canonical, Tools: tools, Executor: &Executor{}, plans: make(map[string]PlanInput)}
+	service := &Service{Workspace: canonical, Tools: tools, Executor: &Executor{Workspace: canonical}, plans: make(map[string]PlanInput)}
 	service.Planner = Planner{Workspace: canonical, Tools: tools}
 	return service, nil
 }
@@ -106,7 +106,7 @@ func (s *Service) State(ctx context.Context) (State, error) {
 	history := make([]OperationResult, 0)
 	for _, project := range projects {
 		path := filepath.Join(s.Workspace, project.Path)
-		items, historyErr := LoadHistory(path, 20)
+		items, historyErr := loadHistoryWithin(s.Workspace, path, 20)
 		if historyErr == nil {
 			history = append(history, items...)
 		}

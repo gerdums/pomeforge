@@ -156,8 +156,12 @@ func ValidateManifest(m Manifest) error {
 }
 
 func LoadManifest(project string) (Manifest, []byte, error) {
+	return loadManifestWithin(project, project)
+}
+
+func loadManifestWithin(workspace, project string) (Manifest, []byte, error) {
 	path := filepath.Join(project, "orchard.json")
-	file, err := openRegularWithin(project, path, os.O_RDONLY, 0)
+	file, err := openRegularWithin(workspace, path, os.O_RDONLY, 0)
 	if err != nil {
 		if errors.Is(err, syscall.ELOOP) {
 			return Manifest{}, nil, Errorf("symlink_not_allowed", "orchard.json must not be a symlink")
@@ -276,7 +280,7 @@ func DiscoverProjects(workspace string) ([]ProjectSummary, error) {
 		if resolveErr != nil {
 			return filepath.SkipDir
 		}
-		manifest, _, loadErr := LoadManifest(path)
+		manifest, _, loadErr := loadManifestWithin(workspace, path)
 		if loadErr != nil {
 			return filepath.SkipDir
 		}

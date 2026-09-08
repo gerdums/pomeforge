@@ -73,7 +73,7 @@ func (p Planner) Plan(ctx context.Context, input PlanInput) (Plan, error) {
 	if err != nil || !info.IsDir() {
 		return Plan{}, Errorf("invalid_project", "project must be a directory")
 	}
-	manifest, _, err := LoadManifest(project)
+	manifest, _, err := loadManifestWithin(p.Workspace, project)
 	if err != nil {
 		return Plan{}, err
 	}
@@ -236,7 +236,7 @@ func (p Planner) fingerprint(ctx context.Context, project string, input PlanInpu
 			selectedIPA = filepath.Clean(relative)
 		}
 	}
-	err := walkRegularFilesWithin(ctx, project, map[string]bool{".git": true, ".orchard": true, ".build": true, "xtool": true}, func(relative string, file *os.File) error {
+	err := walkRegularFilesInProject(ctx, p.Workspace, project, map[string]bool{".git": true, ".orchard": true, ".build": true, "xtool": true}, func(relative string, file *os.File) error {
 		if selectedIPA != "" && filepath.Clean(relative) == selectedIPA {
 			return nil
 		}

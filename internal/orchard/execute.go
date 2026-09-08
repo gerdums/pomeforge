@@ -33,6 +33,7 @@ type Executor struct {
 	Timeout   time.Duration
 	OutputCap int
 	HostOS    string
+	Workspace string
 
 	mu      sync.Mutex
 	running map[string]bool
@@ -122,7 +123,11 @@ func (e *Executor) Execute(ctx context.Context, plan Plan, project string, confi
 		delete(e.running, key)
 		e.mu.Unlock()
 	}()
-	if err := ensureHistory(project); err != nil {
+	workspace := e.Workspace
+	if workspace == "" {
+		workspace = project
+	}
+	if err := ensureHistory(workspace, project); err != nil {
 		return OperationResult{}, Errorf("history_failed", "operation was not started because private history is unavailable: "+err.Error())
 	}
 
@@ -170,7 +175,7 @@ func (e *Executor) Execute(ctx context.Context, plan Plan, project string, confi
 	}
 	result.FinishedAt = time.Now().UTC()
 	result.Output = output.String()
-	if err := appendHistory(project, result); err != nil {
+	if err := appendHistory(workspace, project, result); err != nil {
 		message := "operation completed, but its private history receipt could not be stored: " + err.Error()
 		return result, ErrorWithResult("history_failed", message, result)
 	}
@@ -264,8 +269,8 @@ func operationID() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
 }
 
-func appendHistory(project string, result OperationResult) error {
-	file, err := openHistory(project, syscall.O_WRONLY|syscall.O_APPEND, true)
+func appendHistory(workspace, project string, result OperationResult) error {
+	file, err := openHistoryWithin(workspace, project, syscall.O_WRONLY|syscall.O_APPEND, true)
 	if err != nil {
 		return err
 	}
@@ -279,8 +284,8 @@ func appendHistory(project string, result OperationResult) error {
 	return err
 }
 
-func ensureHistory(project string) error {
-	file, err := openHistory(project, syscall.O_WRONLY|syscall.O_APPEND, true)
+func ensureHistory(workspace, project string) error {
+	file, err := openHistoryWithin(workspace, project, syscall.O_WRONLY|syscall.O_APPEND, true)
 	if err != nil {
 		return err
 	}
@@ -288,7 +293,11 @@ func ensureHistory(project string) error {
 }
 
 func LoadHistory(project string, limit int) ([]OperationResult, error) {
-	file, err := openHistory(project, syscall.O_RDONLY, false)
+	return loadHistoryWithin(project, project, limit)
+}
+
+func loadHistoryWithin(workspace, project string, limit int) ([]OperationResult, error) {
+	file, err := openHistoryWithin(workspace, project, syscall.O_RDONLY, false)
 	if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOENT) {
 		return []OperationResult{}, nil
 	}
@@ -338,12 +347,13 @@ func scanHistory(reader io.Reader, limit int) ([]OperationResult, error) {
 	return results, nil
 }
 
-func openHistory(project string, flags int, create bool) (*os.File, error) {
-	projectFD, err := syscall.Open(project, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+func openHistoryWithin(workspace, project string, flags int, create bool) (*os.File, error) {
+	projectDirectory, err := openDirectoryWithin(workspace, project)
 	if err != nil {
 		return nil, err
 	}
-	defer syscall.Close(projectFD)
+	defer projectDirectory.Close()
+	projectFD := int(projectDirectory.Fd())
 	if create {
 		if err := syscall.Mkdirat(projectFD, ".orchard", 0o700); err != nil && !errors.Is(err, syscall.EEXIST) {
 			return nil, err

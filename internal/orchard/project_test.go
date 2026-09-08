@@ -152,6 +152,34 @@ func TestLoadManifestRejectsSymlinkWithoutChangingTarget(t *testing.T) {
 	}
 }
 
+func TestLoadManifestRejectsReplacedProjectAncestorAfterResolution(t *testing.T) {
+	workspace := t.TempDir()
+	project, err := CreateProject(workspace, filepath.Join("nested", "Demo"), "Demo", "com.example.Demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := ResolveWithin(workspace, project.Path, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if _, err := CreateProject(outside, "Demo", "Outside", "com.example.Outside"); err != nil {
+		t.Fatal(err)
+	}
+	ancestor := filepath.Join(workspace, "nested")
+	if err := os.Rename(ancestor, filepath.Join(workspace, "opened-nested")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, ancestor); err != nil {
+		t.Fatal(err)
+	}
+
+	manifest, _, err := loadManifestWithin(workspace, resolved)
+	if err == nil {
+		t.Fatalf("replaced ancestor redirected manifest read to %q", manifest.Name)
+	}
+}
+
 func TestResolveWithinRejectsTraversalAndSymlink(t *testing.T) {
 	workspace := t.TempDir()
 	outside := t.TempDir()
