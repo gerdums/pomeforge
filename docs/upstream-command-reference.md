@@ -2,6 +2,19 @@
 
 Captured from checksum-verified upstream Linux arm64 release binaries on Debian 12 on 2026-09-08. These help checks used no Apple credentials or network. This is command-contract proof, not build, device, or App Store proof.
 
+## asc --version
+
+Additional version check from the pinned ASC 5.0.0 binary in the Linux arm64
+browser-test container on 2026-09-08. Exit status: 0. Binary SHA-256:
+`f457c466e869bcf1824795f493d4b9169644d7784f0dd124dedd08461c3d5099`.
+
+```text
+5.0.0 (commit: 500a36b, date: 2026-09-06T20:09:08+07:00)
+```
+
+This executable does not prefix its version with `asc version`. Compatibility
+checks must parse the leading version rather than require that label.
+
 ## xtool --version
 
 Exit status: 0
