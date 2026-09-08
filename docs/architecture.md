@@ -61,3 +61,5 @@ The API binds only to loopback, rejects foreign Host and Origin headers, require
 Unit tests and subprocess fixtures establish Orchard's behavior. Linux execution establishes portability only for the tested architecture and environment. A real iOS build, on-device launch, signing validation, TestFlight processing, and App Store submission are separate gates. Do not label any of those complete based on a successful mock or process spawn.
 
 Current upstream evidence and adapter commands are recorded in `docs/toolchain-research.md` after verification.
+
+[Linux toolchain decisions](linux-toolchain-decisions.md) explains the SDK installation, provenance, linker, asset and archive corrections established by actual Linux probes.
