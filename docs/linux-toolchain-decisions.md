@@ -25,6 +25,12 @@ The verified alternative stages the generated Darwin artifact bundle and the sel
 
 SwiftPM's default SDK location can follow the passwd home directory rather than the `HOME` environment variable. Explicit, consistent `XDG_CONFIG_HOME` isolated installation, discovery and builds under the persistent container state in the real test. Query the active Swift SDK configuration instead of guessing its path.
 
+## Preserve compiler invocation names
+
+The actual Swift installation exposes `/usr/bin/swift` as a symlink to `swift-driver`. Invoking `swift --version` succeeds, while invoking the resolved `swift-driver --version` fails with an invalid-driver-name error. The executable uses its invocation name to select its behavior.
+
+Tool discovery, SDK configuration and build planning must retain the intended invocation path or explicitly preserve its original argument zero. Resolve the target when hashing executable bytes, but do not replace the invocation name with the canonical filename. This distinction matters for compiler aliases and other programs that select their mode from their name.
+
 ## Give Clang the actual Darwin SDK root
 
 Swift 6.3.3's Linux link invocation passed `--sysroot`, but Clang's Darwin SDK metadata reader uses `-isysroot`. Without that metadata, it recorded the target minimum as the SDK version: the first real app reported minimum iOS 17 and SDK 17 even though compilation used SDK 26.5.
