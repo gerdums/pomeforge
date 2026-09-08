@@ -6,7 +6,7 @@ The examples assume an existing Pomeforge project at `./Garden`. Substitute your
 
 ## 1. Install the Linux USB services
 
-xtool uses `usbmuxd` to communicate with iOS over USB. Install the distro packages explicitly; Pomeforge does not install system services or change device permissions.
+xtool uses `usbmuxd` to communicate with iOS over USB. Pomeforge's distro packages declare the USB service and utility dependencies, so the package manager installs them. For a portable or source installation, install the distro packages below. The runtime wizard does not run `sudo` or change device permissions.
 
 | Distribution | Command |
 | --- | --- |

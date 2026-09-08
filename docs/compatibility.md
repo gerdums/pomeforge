@@ -1,8 +1,35 @@
 # Compatibility and proof matrix
 
-Pomeforge targets Linux distributions through portable amd64 and arm64 binaries. Dependencies have their own requirements. The evidence below identifies the environments and operations actually exercised; it does not establish the complete pipeline on every distribution.
+Pomeforge 0.1.0 targets Linux amd64 and arm64 with `.deb`, `.rpm`, Arch packages and portable archives. The prebuilt helpers target glibc 2.35 or newer and the GCC 12 C++ runtime (`GLIBCXX_3.4.30`). Packages include the CLI, asset compiler and unxip; first run downloads the pinned Swift 6.3.3 Ubuntu 22.04 toolchain. Apple SDKs remain operator-supplied. A matching libc version alone does not establish full distribution compatibility.
 
-## Current Pomeforge evidence
+## 0.1.0 package candidate evidence
+
+The following checks used `33c8aad`, before the later runtime archive-containment correction. Exact hashes and source boundaries are in [verification.md](verification.md).
+
+| Check | Confirmed scope |
+| --- | --- |
+| Package build | Native Linux arm64 produced all four package formats using Go 1.24.13 and Swift 6.3.3 on Ubuntu 22.04 |
+| Desktop setup and workspace | Fresh `.deb` on Ubuntu 24.04, non-root GIO 2.80/xterm/Xvfb and Chromium: all four grouped checks passed; setup downloads were declined, the window closed on Enter, and a separate fresh workspace created HelloWorld through the real authenticated UI |
+| Portable archive | Eight non-root Linux arm64 checks passed, including installation into a path with spaces, repeat installation, helper execution and both desktop entries |
+| Complete guided local setup | Fresh Linux arm64 quickstart passed in 192.807 seconds, including the official runtime download, supplied full-XIP SDK import, six metadata-source hash checks and HelloWorld compilation; no Apple account/device operation |
+| Generated debug app | Actual iPhoneOS 26.5 SDK selected; arm64 executable produced. Its debug Mach-O stamps minimum iOS 17 / SDK 17, so this run does not prove release metadata or Store readiness |
+
+The release workflow defines native GitHub package builds for amd64/arm64 and nine fresh distribution/architecture smoke jobs. Their results remain pending; [GitHub Actions](https://github.com/gerdums/pomeforge/actions) is the live record. Native amd64 iOS compilation, native Omarchy desktop behavior, physical USB access and Apple outcomes remain separate acceptance gates.
+
+## Distribution targets
+
+| Target | Package and baseline | Evidence boundary |
+| --- | --- | --- |
+| Ubuntu 22.04/24.04; Debian 12/13 | `.deb`, amd64/arm64; glibc ≥2.35 and libstdc++ ≥12 | Native arm64 Jammy build, Ubuntu 24.04 container desktop and separate Linux arm64 quickstart evidence above; GitHub Ubuntu 22.04 and Debian smoke results pending |
+| Fedora | `.rpm`, amd64/arm64; compatible glibc/C++ runtime and package dependencies | Fedora 44 container smoke is configured; host SELinux, desktop and USB behavior unproved |
+| Arch / Omarchy | Arch package or portable archive; compatible runtime plus `libxml2-legacy` | Native amd64 Arch smoke is configured; native Omarchy and host USB/udev behavior unproved. Earlier QEMU results below are retained separately |
+| Other glibc distributions | Portable amd64/arm64 archive with required distro libraries | Portable installation passed on Linux arm64; verify the target's shared-library versions, desktop opener and device services |
+| Alpine / other musl distributions | A compatible local Linux container | Bundled Swift helpers target glibc; the static Go CLI alone does not establish a complete musl workflow |
+| Other CPU architectures | No 0.1.0 binary asset | Upstream iOS toolchains may not supply compatible host binaries |
+
+System library dependencies, host service access and device trust remain prerequisites. Setup does not silently invoke sudo or replace a system compiler. See the [local Linux container guide](container.md).
+
+## Historical foundation evidence
 
 The core and release results use product source at `4171935b3230da04bf35ba69ba042563ce00bae8`, which is identical to the independently reviewed product source at `bb831ed`. The later desktop correction was delivered at `e8e4027` and independently reviewed and tested at `c10774b`. Its fresh Linux build has the same CLI hash as the earlier proof. Source revisions, binary hashes and retained proof boundaries are recorded in [verification.md](verification.md).
 
@@ -23,7 +50,7 @@ The exported IPA used a synthetic profile and identity with an explicitly suppli
 
 The successful Go 1.27.1 result is limited to the recorded emulated Arch operations. A native Omarchy session, native amd64 iOS compilation, host USB permissions and distribution-specific desktop behavior still need direct verification.
 
-## Earlier upstream and adapter evidence
+### Earlier upstream and adapter evidence
 
 These checks predate the final Pomeforge composition. They remain useful dependency evidence with their original scope.
 
@@ -37,15 +64,3 @@ These checks predate the final Pomeforge composition. They remain useful depende
 | AssetKit pinned source | Swift 6.3.3, Linux arm64 container | Upstream test runner reports 38 tests; external rsvg-convert test skipped, Apple assetutil gate unavailable on Linux |
 
 The AssetKit revision is `e763558b55fcbb5a443b1d7b2c6f0972d8bd14f7`. The official Swift Linux arm64 image used for native proof is pinned to `sha256:f2c50c083788a59d534a26c5d90b54023494a1c7d875aa6ef8c5837b0e08c7aa`. Pomeforge's wrapper and final export path were exercised separately in the native run above. Historical command and artifact records are retained in [the earlier verification record](history/orchard-verification.md).
-
-## Distribution targets
-
-| Target | Packaging approach | Required follow-up |
-| --- | --- | --- |
-| Omarchy / Arch x86_64 | Portable executable, desktop entry, user-owned managed tools | Test a native Omarchy session and amd64 iOS build, udev permissions, AppImage extraction and Swift dependencies; retain the emulation limitations above |
-| Ubuntu / Debian amd64 and arm64 | Portable executable and extracted managed tools | Extend the native arm64 container evidence to supported host libc versions, desktop launch and USB service installation |
-| Fedora amd64 and arm64 | Same executable; distro-specific prerequisite guidance | Validate SELinux/device permissions and Swift dependencies |
-| Alpine / other musl distributions | Static Pomeforge core and a local compatible Linux container for upstream tools | Verify the full container workflow and any required device access on the target host |
-| Other CPU architectures | Source build of Pomeforge where Go supports it | Upstream iOS toolchains may not supply compatible host binaries |
-
-Swift availability, usbmuxd access, device trust and CPU architecture remain separate prerequisites. Setup does not silently invoke sudo or replace a system compiler. See the [local Linux container guide](container.md) for the compatibility fallback and its host requirements.

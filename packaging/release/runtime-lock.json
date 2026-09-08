@@ -1,0 +1,19 @@
+{
+  "version": "6.3.3",
+  "platform": "ubuntu22.04",
+  "minimumGlibc": "2.35",
+  "assets": {
+    "amd64": {
+      "url": "https://download.swift.org/swift-6.3.3-release/ubuntu2204/swift-6.3.3-RELEASE/swift-6.3.3-RELEASE-ubuntu22.04.tar.gz",
+      "sha256": "2c3ad7ad74ab7249d42f172ee3b40bc8a729893010b4a3384ba26f3c61e35008",
+      "size": 1068117762,
+      "root": "swift-6.3.3-RELEASE-ubuntu22.04"
+    },
+    "arm64": {
+      "url": "https://download.swift.org/swift-6.3.3-release/ubuntu2204-aarch64/swift-6.3.3-RELEASE/swift-6.3.3-RELEASE-ubuntu22.04-aarch64.tar.gz",
+      "sha256": "3aa77d8e06cf236a2352f743648bacca7e6c3f05b0cb8b025786dc469202bea2",
+      "size": 1053213099,
+      "root": "swift-6.3.3-RELEASE-ubuntu22.04-aarch64"
+    }
+  }
+}

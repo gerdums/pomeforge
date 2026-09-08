@@ -1,5 +1,17 @@
 # Linux setup and SDK import
 
+## Packaged first run
+
+Install the [0.1.0 package for your distribution](../README.md#install-010), then open **Pomeforge Setup** or run `pomeforge quickstart` in a terminal. The package includes prebuilt AssetKit and unxip helpers. The wizard installs the pinned official Swift 6.3.3 Linux toolchain, installs xtool, imports the Xcode archive you select, and prepares a Hello World project. It guides development signing and installation through interactive prompts.
+
+The Swift download is about 1.1 GB and expands to about 3.5 GB. Keep additional space for Apple's XIP, extraction and the installed SDK. Package-manager installation supplies Linux libraries and USB utilities. All downloads and Apple sign-in remain visible; opening the ordinary workspace or running `doctor` does not download tools. Run Pomeforge as your normal user.
+
+`pomeforge quickstart --help` lists the wizard options. It can resume with the existing SDK and project. Authentication and device identifiers are not saved as wizard checkpoints. An agent should use the existing JSON tool/SDK/project commands and leave interactive credentials and phone trust prompts to the user.
+
+The steps below are for source builds, manual setup and troubleshooting. Packaged users do not need to compile these helpers.
+
+## Manual tool installation
+
 Pomeforge can install the open-source tools listed in `toolchains.lock.json` into
 private XDG directories. Planning is the default; `--execute` is always a
 separate, explicit gate.

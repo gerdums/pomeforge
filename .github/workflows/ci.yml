@@ -44,6 +44,8 @@ jobs:
           gio version
       - name: Test graphical workspace and desktop packaging
         run: node --test packaging/tests/*.test.mjs
+      - name: Test release installer and archive contracts
+        run: python3 packaging/tests/release_test.py
       - name: Test container contracts
         run: sh packaging/tests/container-contract.test.sh
 

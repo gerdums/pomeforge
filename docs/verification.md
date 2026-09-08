@@ -1,5 +1,27 @@
 # Verification record
 
+## 0.1.0 package candidate evidence
+
+These checks used candidate `33c8aadfe222c6b29501162eaf77345829068d7f`, before the later runtime archive-containment correction. They establish the recorded candidate behavior, not a later artifact by implication. All builds, installation, terminal interaction and browser automation ran in Linux.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Native release packaging | Linux arm64, Go 1.24.13, Swift 6.3.3 Ubuntu 22.04 image | `.deb`, `.rpm`, Arch package and portable archive built; asset compiler and unxip are prebuilt with static Swift libraries |
+| Installed desktop flows | Fresh `.deb`, non-root Ubuntu 24.04 container, GIO 2.80, xterm/Xvfb and Chromium | Four grouped checks passed: exact package/CLI identity, setup consent and download decline, fresh workspace launch, authenticated HelloWorld creation with on-disk Swift source; screenshots and 3.92-second setup / 1.92-second workspace videos retained |
+| Portable installation | Actual portable archive, non-root Linux arm64 | Eight checks passed, including manifest verification, a path with spaces, repeat installation, CLI/helper execution, both menu entries and structured rejection of unattended quickstart; installation created no runtime or workspace |
+| Fresh packaged quickstart | Non-root Linux arm64, empty runtime/SDK state, operator-supplied Xcode 26.6 archive | Passed with exit 0 in 192.807 seconds: Linux tools ready at 55.485 seconds, SDK import and validation reached the build at 154.517 seconds, then HelloWorld compiled in about 38.29 seconds |
+| SDK and app inspection | Same quickstart run, actual iPhoneOS 26.5 SDK | Six retained metadata-source hashes, private `0600` receipt and active `arm64-apple-ios` selection verified; output is an arm64 iOS Mach-O executable. This debug build records minimum iOS 17 and linked SDK 17; it is not release-metadata or Store-readiness proof |
+
+The tested `.deb` SHA-256 is `a1c9029dbb08cd66dec942c12869c77eaf2ea6bc270ccb7516354e6195471128`; its installed CLI is `3a6640cf2a210df148d5cd2d32f66fd4d338ca199c22e85ff099cdc77a0c230e`. The portable archive SHA-256 is `7aa4a7ca3f7c38bce7757902b31b38646fbf98177de0bce74a0f4e786fd392e4`. The setup decline and full quickstart are separate runs; neither performed Apple account or physical-device operations.
+
+## Current coverage and outstanding checks
+
+The release workflow defines native GitHub amd64 and arm64 package builds plus nine fresh distribution/architecture smoke jobs: Ubuntu 22.04, Debian 12, Debian 13 and Fedora 44 on both architectures, and Arch on amd64. Those jobs exercise package installation, pinned Swift/xtool setup, helper discovery, project generation and a SwiftPM host manifest. Their results are pending; consult [GitHub Actions](https://github.com/gerdums/pomeforge/actions). They do not test iOS compilation, a graphical host session or USB access.
+
+Native amd64 package/toolchain results remain pending that workflow; native amd64 iOS compilation is a separate gap. Native Omarchy desktop behavior, host USB/udev permissions, Fedora SELinux behavior, physical iPhone/iPad installation and interaction, a real Apple distribution identity, upload processing, TestFlight and App Review still need direct proof. Container checks do not establish these host or Apple outcomes.
+
+## Historical foundation evidence
+
 The native SDK/release and container checks ran against Pomeforge source `4171935b3230da04bf35ba69ba042563ce00bae8`. Graphical and core QA ran against the independently reviewed revision `bb831ed60c2dad569e993ddf64077d78cf2c6f6e`; all 121 product paths, file contents and executable modes match that delivery revision exactly. The revisions differ in private orchestration packets and Git ancestry. A later desktop-launcher compatibility correction was tested at `c10774b3f8043dc641530795b38b84af3c2c0957`, corresponding to delivered source `e8e402795f75ddd3098ae0d3dace37d46652b9e0`. It changes installer escaping and its regression coverage; a fresh Linux build produces the same CLI hash as the earlier core, graphical and iOS proof. Subsequent documentation-only updates record these results. All compilation, SDK extraction, asset processing, signing, tests, and browser automation below ran in Linux. The workstation only orchestrated containers, edited source, and collected evidence.
 
 | Check | Environment | Result |
@@ -24,9 +46,9 @@ The synthetic identity uses an arbitrary test CA through a private PKCS#12 fixtu
 
 The supplied Xcode archive SHA-256 is `06384762f286fb4d20440f7a67ba40cdf79bedb1cbee9e5111e3030a53a6cb81`. It reports Xcode 26.6/build 17F113, SDK version 26.5 and SDK system build 23F81a. Its provenance is operator-supplied; Pomeforge does not claim to have verified Apple's archive signature. No Apple SDK is included in the repository or distributable container image.
 
-## Remaining evidence
+### Historical limitations and emulation failures
 
-Physical iPhone/iPad installation and interaction, a real Apple distribution identity, Apple upload processing, TestFlight installation and App Review submission have not been established. Native Omarchy desktop and native amd64 complete-toolchain testing also remain outstanding. Portable binary execution is a narrower result than whole-distribution compatibility.
+At this earlier checkpoint, physical-device and Apple account outcomes, native Omarchy desktop behavior and native amd64 complete-toolchain testing were unproved. The later package evidence above has its own narrower scope.
 
 The final Go 1.24.13 amd64 binary reported its version under emulation but crashed in the Go runtime (`lfstack.push`) while generating a project icon. The same source built on Linux with Go 1.27.1 passed project creation and generation of a correctly blocked build plan in fresh emulated Arch state. Both the failed Go 1.24.13 result and separate Go 1.27.1 binary provenance are retained; no emulator workaround or global configuration change was used. Native Go 1.24.13 Linux arm64 checks passed.
 

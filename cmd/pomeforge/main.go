@@ -90,6 +90,8 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 		return command.success(agentSchema(), "Use `pomeforge schema --json` for the machine-readable command and action schema.")
 	case "init":
 		return command.init(args)
+	case "quickstart":
+		return command.quickstart(args)
 	case "doctor":
 		return command.doctor(args, false)
 	case "tools":
@@ -154,6 +156,7 @@ Commands:
   version                 Print Pomeforge's version
   schema                  Print the machine-readable command/action schema
   init NAME               Create a project (--bundle-id is required)
+  quickstart              Guided terminal setup and HelloWorld device installation
   doctor                  Inspect tools and capabilities
   tools                   Inspect, install, or register supported tools
   sdk                     Inspect or import the Darwin Swift SDK
@@ -167,16 +170,17 @@ Run pomeforge COMMAND --help for command flags and effects.`
 
 func commandHelp(name string) (string, bool) {
 	help := map[string]string{
-		"version": "Usage: pomeforge version [--json]\nPrint Pomeforge's version. Effect: none.",
-		"schema":  "Usage: pomeforge schema [--json]\nPrint commands, flags, actions, effects, and confirmation requirements.",
-		"init":    "Usage: pomeforge init NAME [--dir PATH] --bundle-id ID [--json]\nCreate a SwiftUI project without overwriting an existing path. Effect: filesystem write.",
-		"doctor":  "Usage: pomeforge doctor [--json]\nRun bounded credential-free tool probes and report capability prerequisites. Effect: local read.",
-		"tools":   "Usage: pomeforge tools [--json]\n       pomeforge tools install TOOL [--execute] [--json]\n       pomeforge tools register HELPER --path PATH [--source-revision REV] [--assetkit-revision REV] [--execute] [--json]\nInspect tools, install one checksum-pinned catalog tool, or integrity-register pomeforge-assets/unxip.",
-		"sdk":     "Usage: pomeforge sdk status [--execute] [--json]\n       pomeforge sdk import --input /path/Xcode.app|Xcode.xip --arch arm64|x86_64 [--execute] [--json]\nPreview by default; --execute performs the workspace-scoped operation.",
-		"signing": "Usage: pomeforge signing list|inspect|configure [options] [--json]\nConfigure and inspect named private signing identities without exposing private paths.",
-		"plan":    "Usage: pomeforge plan ACTION [--project PATH] [action fields] [--json]\nActions: " + actionNames() + "\nInspect exact structured operations or argv, warnings, blockers, effects, and confirmation needs without executing.",
-		"run":     "Usage: pomeforge run ACTION [--project PATH] --execute [action fields] [--confirm] [--json]\nExecute a regenerated plan. Local export requires only --execute; account writes and development installation also require --confirm.",
-		"app":     "Usage: pomeforge app [--workspace PATH] [--listen 127.0.0.1:PORT] [--open] [--json]\nServe the token-authenticated loopback workspace; --open invokes xdg-open without account secrets.",
+		"version":    "Usage: pomeforge version [--json]\nPrint Pomeforge's version. Effect: none.",
+		"schema":     "Usage: pomeforge schema [--json]\nPrint commands, flags, actions, effects, and confirmation requirements.",
+		"init":       "Usage: pomeforge init NAME [--dir PATH] --bundle-id ID [--json]\nCreate a SwiftUI project without overwriting an existing path. Effect: filesystem write.",
+		"quickstart": quickstartHelp,
+		"doctor":     "Usage: pomeforge doctor [--json]\nRun bounded credential-free tool probes and report capability prerequisites. Effect: local read.",
+		"tools":      "Usage: pomeforge tools [--json]\n       pomeforge tools install TOOL [--execute] [--json]\n       pomeforge tools register HELPER --path PATH [--source-revision REV] [--assetkit-revision REV] [--execute] [--json]\nInspect tools, install one checksum-pinned catalog tool, or integrity-register pomeforge-assets/unxip.",
+		"sdk":        "Usage: pomeforge sdk status [--execute] [--json]\n       pomeforge sdk import --input /path/Xcode.app|Xcode.xip --arch arm64|x86_64 [--execute] [--json]\nPreview by default; --execute performs the workspace-scoped operation.",
+		"signing":    "Usage: pomeforge signing list|inspect|configure [options] [--json]\nConfigure and inspect named private signing identities without exposing private paths.",
+		"plan":       "Usage: pomeforge plan ACTION [--project PATH] [action fields] [--json]\nActions: " + actionNames() + "\nInspect exact structured operations or argv, warnings, blockers, effects, and confirmation needs without executing.",
+		"run":        "Usage: pomeforge run ACTION [--project PATH] --execute [action fields] [--confirm] [--json]\nExecute a regenerated plan. Local export requires only --execute; account writes and development installation also require --confirm.",
+		"app":        "Usage: pomeforge app [--workspace PATH] [--listen 127.0.0.1:PORT] [--open] [--json]\nServe the token-authenticated loopback workspace; --open invokes xdg-open without account secrets.",
 	}
 	value, ok := help[name]
 	return value, ok
@@ -693,6 +697,7 @@ func agentSchema() any {
 		{Name: "version", Description: "Print Pomeforge's version.", Parameters: []schemaParameter{}, Effect: "none"},
 		{Name: "schema", Description: "Discover commands, actions, parameters, and effects.", Parameters: []schemaParameter{}, Effect: "none"},
 		{Name: "init", Description: "Create a SwiftUI iPhone and iPad project without overwriting.", Parameters: []schemaParameter{{"name", "string", true, "Simple Swift project name."}, {"--dir", "path", false, "Destination directory; defaults to NAME."}, {"--bundle-id", "string", true, "Reverse-DNS bundle identifier."}}, Effect: "filesystem-write"},
+		{Name: "quickstart", Description: "Interactive Linux terminal wizard. Requires terminal stdin/stdout/stderr; --json returns interactive_required without effects. Agents use the separate tools, sdk, init, plan and run commands.", Parameters: []schemaParameter{{"--workspace", "path", false, "Defaults to ~/PomeforgeProjects; creates or resumes HelloWorld."}, {"--xcode", "path", false, "Operator-supplied Xcode XIP or extracted Xcode.app."}, {"--bundle-id", "string", false, "Optional bundle ID; generated once for a new project otherwise."}, {"--skip-device", "boolean", false, "Stop after the local build without authentication or device access."}}, Effect: "interactive-confirmed-local-and-device-writes"},
 		{Name: "doctor", Description: "Probe prerequisites and capabilities.", Parameters: []schemaParameter{}, Effect: "local-read"},
 		{Name: "tools", Description: "Probe tools, install a checksum-pinned catalog tool, or register a local helper by SHA-256.", Parameters: []schemaParameter{{"subcommand", "enum", false, "install TOOL or register HELPER; omitted for diagnostics."}, {"--path", "path", false, "Existing helper executable."}, {"--source-revision", "string", false, "Known source revision; never inferred."}, {"--assetkit-revision", "string", false, "Known AssetKit revision; never inferred."}, {"--execute", "boolean", false, "Perform the planned local write."}}, Effect: "subcommand-dependent"},
 		{Name: "sdk", Description: "Inspect status or import an operator-supplied Apple SDK on Linux.", Parameters: []schemaParameter{{"subcommand", "enum", true, "status or import."}, {"--input", "path", false, "Extracted Xcode.app or XIP input."}, {"--arch", "enum", false, "arm64 or x86_64."}, {"--execute", "boolean", false, "Perform the planned operation."}}, Effect: "subcommand-dependent"},

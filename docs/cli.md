@@ -1,5 +1,10 @@
 # Pomeforge CLI
 
+## Guided first run
+
+After installing a release package, run `pomeforge quickstart` in an interactive terminal. It prepares the pinned Linux runtime and Hello World project, then guides SDK import and physical-device installation. Use `pomeforge quickstart --help` for options. `--json` returns `interactive_required` without prompting; automation uses the individual JSON commands documented below, while the user handles Apple credentials and phone prompts.
+
+
 Pomeforge is a local Linux CLI and authenticated loopback workspace for SwiftUI
 iPhone and iPad projects. It uses JSON envelopes for automation and readable
 text by default. Run `pomeforge schema --json` to discover commands, parameters,

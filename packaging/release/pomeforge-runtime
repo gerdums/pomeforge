@@ -1,0 +1,351 @@
+#!/usr/bin/env python3
+"""Install the pinned Linux Swift compiler only on an explicit request."""
+import ctypes
+import errno
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path, PurePosixPath
+import platform
+import posixpath
+import shutil
+import stat
+import subprocess
+import sys
+import tarfile
+import tempfile
+import urllib.request
+
+CHUNK = 1024 * 1024
+MAX_EXPANDED = 5 * 1024 ** 3
+MAX_MEMBERS = 10000
+RECEIPT = ".pomeforge-runtime.json"
+
+
+def digest(path):
+    result = hashlib.sha256()
+    with open(path, "rb") as source:
+        for chunk in iter(lambda: source.read(CHUNK), b""):
+            result.update(chunk)
+    return result.hexdigest()
+
+
+def host_arch():
+    if platform.system() != "Linux":
+        raise RuntimeError("Pomeforge runtime setup requires Linux.")
+    value = {"x86_64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(platform.machine())
+    if not value:
+        raise RuntimeError("Supported architectures are Linux amd64 and arm64.")
+    return value
+
+
+def check_host():
+    if os.geteuid() == 0:
+        raise RuntimeError("Run runtime setup as your normal user, without sudo.")
+    libc = ctypes.CDLL(None)
+    try:
+        version_function = libc.gnu_get_libc_version
+    except AttributeError:
+        raise RuntimeError("The pinned Swift runtime requires glibc 2.35 or newer; musl is not supported.") from None
+    version_function.restype = ctypes.c_char_p
+    version = version_function().decode("ascii")
+    if tuple(map(int, version.split(".")[:2])) < (2, 35):
+        raise RuntimeError("The pinned Swift runtime requires glibc 2.35 or newer (found " + version + ").")
+
+
+def load_lock():
+    return json.loads(Path(__file__).resolve().with_name("runtime-lock.json").read_text())
+
+
+def selected_root(arch, lock):
+    supplied = os.environ.get("XDG_DATA_HOME", "")
+    if supplied.startswith("/"):
+        data = Path(supplied)
+    else:
+        home = os.environ.get("HOME", "")
+        if not home.startswith("/"):
+            raise RuntimeError("An absolute HOME or XDG_DATA_HOME is required.")
+        data = Path(home) / ".local/share"
+    # The explicitly selected XDG base may itself be a symlink. Every managed
+    # directory beneath that base is checked separately and cannot be a link.
+    data = data.resolve()
+    parent = data / "pomeforge/runtime"
+    name = "swift-" + lock["version"] + "-" + lock["platform"] + "-" + arch
+    return data, parent, parent / name
+
+
+def private_directory(path, create=False):
+    if create:
+        try:
+            path.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o022:
+        raise RuntimeError("Runtime state must be an owned directory without group/other write access: " + str(path))
+
+
+def validate_managed_parents(data, parent, create=False):
+    if create:
+        data.mkdir(parents=True, exist_ok=True)
+    private_directory(data)
+    private_directory(data / "pomeforge", create)
+    private_directory(parent, create)
+
+
+def archive_path(name, root):
+    if "\\" in name or "\x00" in name or name.startswith("/"):
+        raise RuntimeError("Unsafe Swift archive path.")
+    parts = name.rstrip("/").split("/")
+    if not parts or parts[0] != root or any(x in ("", ".", "..") for x in parts):
+        raise RuntimeError("Unexpected Swift archive root or path.")
+    return "/".join(parts[1:])
+
+
+def inspect_members(archive, expected_root):
+    members = []
+    by_name = {}
+    size = 0
+    for member in archive:
+        if len(members) >= MAX_MEMBERS:
+            raise RuntimeError("Swift archive contains too many members.")
+        name = archive_path(member.name, expected_root)
+        if name in by_name:
+            raise RuntimeError("Duplicate Swift archive path.")
+        if not (member.isfile() or member.isdir() or member.issym()):
+            raise RuntimeError("Swift archive contains a hardlink or special file.")
+        if not name and not member.isdir():
+            raise RuntimeError("Swift archive root must be a directory.")
+        if member.size < 0:
+            raise RuntimeError("Invalid Swift archive size.")
+        size += member.size
+        if size > MAX_EXPANDED:
+            raise RuntimeError("Swift archive expands beyond its allowed size.")
+        if member.issym():
+            target = member.linkname
+            if not target or target.startswith("/") or "\\" in target or "\x00" in target:
+                raise RuntimeError("Unsafe Swift archive symlink.")
+            resolved = posixpath.normpath(posixpath.join(posixpath.dirname(name), target))
+            if resolved == ".." or resolved.startswith("../"):
+                raise RuntimeError("Swift archive symlink escapes its root.")
+        by_name[name] = member
+        members.append((name, member))
+    for name, member in members:
+        for ancestor in PurePosixPath(name).parents:
+            if str(ancestor) == ".":
+                continue
+            entry = by_name.get(str(ancestor))
+            if entry is not None and not entry.isdir():
+                raise RuntimeError("Swift archive member has a non-directory parent.")
+        if member.issym():
+            cursor = name
+            seen = set()
+            while cursor in by_name and by_name[cursor].issym():
+                if cursor in seen:
+                    raise RuntimeError("Cyclic Swift archive symlink.")
+                seen.add(cursor)
+                cursor = posixpath.normpath(posixpath.join(posixpath.dirname(cursor), by_name[cursor].linkname))
+            if cursor not in by_name:
+                raise RuntimeError("Swift archive symlink target is missing.")
+    return members
+
+
+def extract_verified(archive_pathname, destination, expected_root):
+    records = {}
+    with tarfile.open(archive_pathname, "r:gz") as archive:
+        members = inspect_members(archive, expected_root)
+        # No path below a link was accepted, and the staging tree is new/private.
+        # Write directories/files first; only then create the verified links.
+        for name, member in members:
+            if not name:
+                continue
+            path = destination / name
+            if member.isdir():
+                path.mkdir(mode=0o755, parents=True, exist_ok=True)
+                records[name] = {"type": "directory"}
+            elif member.isfile():
+                path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+                mode = 0o755 if member.mode & 0o111 else 0o644
+                result = hashlib.sha256()
+                with archive.extractfile(member) as source, open(path, "xb") as target:
+                    copied = 0
+                    for chunk in iter(lambda: source.read(CHUNK), b""):
+                        copied += len(chunk)
+                        target.write(chunk)
+                        result.update(chunk)
+                    if copied != member.size:
+                        raise RuntimeError("Truncated Swift archive member.")
+                path.chmod(mode)
+                records[name] = {"type": "file", "size": member.size, "mode": mode, "sha256": result.hexdigest()}
+        for name, member in members:
+            if member.issym():
+                path = destination / name
+                path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+                path.symlink_to(member.linkname)
+                records[name] = {"type": "symlink", "target": member.linkname}
+        # Lexical normalization alone is insufficient when a link target
+        # traverses another directory symlink before processing '..'. Resolve
+        # the complete staged graph before any caller can activate it.
+        canonical_root = destination.resolve(strict=True)
+        for name, member in members:
+            if member.issym():
+                try:
+                    resolved = (destination / name).resolve(strict=True)
+                except (OSError, RuntimeError) as error:
+                    raise RuntimeError("Swift archive symlink cannot be resolved safely.") from error
+                if not resolved.is_relative_to(canonical_root):
+                    raise RuntimeError("Swift archive symlink resolves outside its root.")
+    return records
+
+
+def verify_tree(root, arch, lock):
+    private_directory(root)
+    receipt_path = root / RECEIPT
+    info = receipt_path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_size > 8 * CHUNK:
+        raise RuntimeError("Invalid runtime receipt.")
+    receipt = json.loads(receipt_path.read_text())
+    expected = lock["assets"][arch]
+    if receipt.get("archiveSHA256") != expected["sha256"] or receipt.get("architecture") != arch or receipt.get("version") != lock["version"]:
+        raise RuntimeError("Runtime receipt does not match the pinned compiler.")
+    records = receipt.get("files")
+    if not isinstance(records, dict) or not records or len(records) > MAX_MEMBERS:
+        raise RuntimeError("Invalid runtime file manifest.")
+    seen = set()
+    for base, directories, files in os.walk(root, followlinks=False):
+        for name in directories + files:
+            path = Path(base) / name
+            relative = path.relative_to(root).as_posix()
+            if relative == RECEIPT:
+                continue
+            seen.add(relative)
+            expected_file = records.get(relative)
+            if not expected_file:
+                raise RuntimeError("Unexpected file in managed Swift runtime: " + relative)
+            info = path.lstat()
+            kind = expected_file.get("type")
+            good = False
+            if kind == "directory":
+                good = stat.S_ISDIR(info.st_mode)
+            elif kind == "symlink":
+                good = stat.S_ISLNK(info.st_mode) and os.readlink(path) == expected_file.get("target")
+                if good:
+                    try:
+                        good = path.resolve(strict=True).is_relative_to(root.resolve(strict=True))
+                    except (OSError, RuntimeError):
+                        good = False
+            elif kind == "file":
+                good = stat.S_ISREG(info.st_mode) and info.st_size == expected_file.get("size") and stat.S_IMODE(info.st_mode) == expected_file.get("mode") and digest(path) == expected_file.get("sha256")
+            if not good:
+                raise RuntimeError("Managed Swift runtime changed: " + relative)
+    if seen != set(records):
+        raise RuntimeError("Managed Swift runtime files are missing.")
+    for name in ("swift", "swift-package", "swift-frontend", "clang"):
+        path = root / "usr/bin" / name
+        if not path.is_file() or not os.access(path, os.X_OK) or not path.resolve().is_relative_to(root):
+            raise RuntimeError("Managed Swift runtime is incomplete.")
+
+
+def check_runtime(root):
+    environment = {k: v for k, v in os.environ.items() if not k.startswith("LD_") and k not in ("DYLD_LIBRARY_PATH",)}
+    for name in ("swift", "swift-package", "swift-frontend"):
+        result = subprocess.run([str(root / "usr/bin" / name), "--version"], env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=45)
+        if result.returncode:
+            raise RuntimeError("Swift cannot start; install the Linux dependencies listed in the release instructions. " + result.stdout[:1500].strip())
+    if not shutil.which("cc") or not Path("/usr/include/stdlib.h").is_file():
+        raise RuntimeError("Swift needs the Linux C compiler and headers. Install build-essential (Debian/Ubuntu), gcc-c++ and glibc-devel (Fedora), or base-devel (Arch), then retry.")
+
+
+def download(asset, path):
+    request = urllib.request.Request(asset["url"], headers={"User-Agent": "Pomeforge-runtime/0.1.0"})
+    received = 0
+    result = hashlib.sha256()
+    announced = -1
+    with urllib.request.urlopen(request, timeout=60) as response, open(path, "xb") as target:
+        if not response.geturl().startswith("https://"):
+            raise RuntimeError("Swift download was redirected away from HTTPS.")
+        advertised = response.headers.get("Content-Length")
+        if advertised and int(advertised) != asset["size"]:
+            raise RuntimeError("Swift download has an unexpected size.")
+        path.chmod(0o600)
+        for chunk in iter(lambda: response.read(CHUNK), b""):
+            received += len(chunk)
+            if received > asset["size"]:
+                raise RuntimeError("Swift download exceeds its pinned size.")
+            target.write(chunk)
+            result.update(chunk)
+            percent = received * 100 // asset["size"]
+            if percent // 10 > announced:
+                announced = percent // 10
+                print("Downloading Swift: " + str(percent) + "%", flush=True)
+    if received != asset["size"] or result.hexdigest() != asset["sha256"]:
+        raise RuntimeError("Swift archive integrity check failed; nothing was installed.")
+
+
+def activate(stage, destination):
+    # Linux renameat2 protects even against an unexpected destination created
+    # after the earlier existence check. Never replace existing user data.
+    libc = ctypes.CDLL(None, use_errno=True)
+    rename = libc.renameat2
+    rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    if rename(-100, os.fsencode(stage), -100, os.fsencode(destination), 1):
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code), str(destination))
+
+
+def main(argv):
+    if len(argv) != 1 or argv[0] not in ("status", "install"):
+        print("Usage: pomeforge-runtime status|install", file=sys.stderr)
+        return 2
+    arch = host_arch()
+    check_host()
+    lock = load_lock()
+    data, parent, destination = selected_root(arch, lock)
+    if argv[0] == "status":
+        validate_managed_parents(data, parent)
+        verify_tree(destination, arch, lock)
+        check_runtime(destination)
+        print("Verified Swift " + lock["version"] + " at " + str(destination))
+        return 0
+    validate_managed_parents(data, parent, create=True)
+    lock_fd = os.open(parent / ".install.lock", os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        info = os.fstat(lock_fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_nlink != 1:
+            raise RuntimeError("Unsafe runtime installation lock.")
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if destination.exists() or destination.is_symlink():
+            verify_tree(destination, arch, lock)
+            check_runtime(destination)
+            print("Swift " + lock["version"] + " is already installed and verified.")
+            return 0
+        if shutil.disk_usage(parent).free < MAX_EXPANDED + lock["assets"][arch]["size"]:
+            raise RuntimeError("Swift installation needs at least 6 GiB of free space.")
+        with tempfile.TemporaryDirectory(prefix=".swift-download-", dir=parent) as temporary:
+            temporary = Path(temporary)
+            archive = temporary / "swift.tar.gz"
+            print("Installing official Swift " + lock["version"] + " for " + arch + ".", flush=True)
+            download(lock["assets"][arch], archive)
+            stage = temporary / "toolchain"
+            stage.mkdir(mode=0o700)
+            print("Archive verified. Extracting the compiler and its license files.", flush=True)
+            records = extract_verified(archive, stage, lock["assets"][arch]["root"])
+            receipt = {"version": lock["version"], "architecture": arch, "archiveSHA256": lock["assets"][arch]["sha256"], "files": records}
+            (stage / RECEIPT).write_text(json.dumps(receipt, sort_keys=True) + "\n")
+            (stage / RECEIPT).chmod(0o600)
+            verify_tree(stage, arch, lock)
+            check_runtime(stage)
+            activate(stage, destination)
+        print("Swift is ready at " + str(destination / "usr/bin"))
+        return 0
+    finally:
+        os.close(lock_fd)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except (OSError, ValueError, RuntimeError, tarfile.TarError, subprocess.SubprocessError) as error:
+        print("Pomeforge runtime: " + str(error), file=sys.stderr)
+        sys.exit(1)

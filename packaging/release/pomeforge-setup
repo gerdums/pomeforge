@@ -1,0 +1,14 @@
+#!/bin/sh
+set -u
+entry=$(readlink -f -- "$0") || exit 1
+root=$(CDPATH= cd -- "$(dirname -- "$entry")/.." && pwd -P) || exit 1
+"$root/bin/pomeforge" quickstart
+result=$?
+if [ "$result" -ne 0 ]; then
+  printf '\nPomeforge setup exited with status %s.\n' "$result" >&2
+fi
+if [ -t 0 ]; then
+  printf '\nPress Enter to close this window. '
+  IFS= read -r answer || :
+fi
+exit "$result"

@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+
+entry=$(readlink -f -- "$0")
+root=$(CDPATH= cd -- "$(dirname -- "$entry")/.." && pwd -P)
+case $(uname -m) in
+  x86_64) architecture=amd64 ;;
+  aarch64|arm64) architecture=arm64 ;;
+  *) printf '%s\n' 'Pomeforge supports Linux amd64 and arm64.' >&2; exit 1 ;;
+esac
+case ${XDG_DATA_HOME:-} in
+  /*) data_home=$XDG_DATA_HOME ;;
+  *) data_home=$HOME/.local/share ;;
+esac
+runtime_bin=$data_home/pomeforge/runtime/swift-6.3.3-ubuntu22.04-$architecture/usr/bin
+PATH=$runtime_bin:$root/libexec:$PATH
+export PATH
+exec "$root/libexec/pomeforge" "$@"
