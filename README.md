@@ -32,7 +32,7 @@ The [graphical workspace guide](docs/app.md) covers its controls and desktop ins
 ./bin/orchard run build --project ./Fieldnotes --execute
 ```
 
-Edit the generated Swift files with your preferred Linux editor. Orchard's workspace creates projects, diagnoses prerequisites, reviews operations, and displays their actual results; it is not a source editor or an iPhone emulator. Use a physical iPhone or iPad for application testing.
+Edit the generated Swift files with your preferred Linux editor. Orchard's workspace creates projects, diagnoses prerequisites, reviews operations, and displays their actual results; it is not a source editor or an iPhone emulator. Follow the [Linux device guide](docs/devices.md) to test with a physical iPhone or iPad.
 
 Native iOS compilation needs Swift 6.3 or newer and an Apple SDK obtained by the operator. Orchard supplies no Apple SDK and does not fabricate SDK provenance. Physical devices require trust, Developer Mode, compatible provisioning, and Linux USB access. Distribution requires an eligible Apple Developer account and an appropriate signing identity/profile. Apple's SDK terms and current upload requirements are linked in the [toolchain research](docs/toolchain-research.md).
 
