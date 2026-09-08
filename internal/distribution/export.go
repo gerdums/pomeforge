@@ -490,13 +490,15 @@ func canonicalizeIPA(ctx context.Context, source, destination, appRoot, executab
 	if len(zr.File) > limits.MaxArchiveEntries {
 		return fmt.Errorf("signed IPA has %d entries; limit is %d", len(zr.File), limits.MaxArchiveEntries)
 	}
+	archiveIndex, archiveProblems := indexArchivePaths(zr.File)
+	archiveProblems = append(archiveProblems, requiredArchiveDirectoryProblems(archiveIndex, "Payload", appRoot)...)
+	if len(archiveProblems) != 0 {
+		return fmt.Errorf("%s: %s", archiveProblems[0].Code, archiveProblems[0].Message)
+	}
 	files := map[string]*zip.File{}
 	directories := map[string]bool{"Payload/": true, appRoot + "/": true}
 	var total uint64
-	for _, entry := range zr.File {
-		if err := safeArchiveName(entry.Name); err != nil {
-			return err
-		}
+	for _, entry := range archiveIndex.entries {
 		trimmed := strings.TrimSuffix(entry.Name, "/")
 		if trimmed != "Payload" && trimmed != appRoot && !strings.HasPrefix(trimmed, appRoot+"/") {
 			return fmt.Errorf("unsupported archive entry %q", entry.Name)

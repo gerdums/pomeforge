@@ -74,6 +74,157 @@ func TestInspectIPARejectsUnsafeArchives(t *testing.T) {
 	}
 }
 
+func TestInspectIPARejectsArchivePathKindConflictsInEitherOrder(t *testing.T) {
+	f := newCryptoFixture(t)
+	base := validIPAEntries(t, f.profile(t, profileOptions{}), false)
+	cases := []struct {
+		name  string
+		first zipEntry
+		last  zipEntry
+		codes []string
+	}{
+		{"file then directory", zipEntry{"Payload/Orchard.app/Resources", []byte("file"), 0o600}, zipEntry{"Payload/Orchard.app/Resources/", nil, os.ModeDir | 0o755}, []string{"archive_path_kind_collision"}},
+		{"directory then file", zipEntry{"Payload/Orchard.app/Resources/", nil, os.ModeDir | 0o755}, zipEntry{"Payload/Orchard.app/Resources", []byte("file"), 0o600}, []string{"archive_path_kind_collision"}},
+		{"Payload file before descendants", zipEntry{"Payload", []byte("file"), 0o600}, zipEntry{}, []string{"archive_file_ancestor", "archive_required_directory"}},
+		{"Payload file after descendants", zipEntry{}, zipEntry{"Payload", []byte("file"), 0o600}, []string{"archive_file_ancestor", "archive_required_directory"}},
+		{"app file before descendants", zipEntry{"Payload/Orchard.app", []byte("file"), 0o600}, zipEntry{}, []string{"archive_file_ancestor", "archive_required_directory"}},
+		{"app file after descendants", zipEntry{}, zipEntry{"Payload/Orchard.app", []byte("file"), 0o600}, []string{"archive_file_ancestor", "archive_required_directory"}},
+		{"nested file before descendant", zipEntry{"Payload/Orchard.app/Nested", []byte("file"), 0o600}, zipEntry{"Payload/Orchard.app/Nested/value", []byte("value"), 0o600}, []string{"archive_file_ancestor"}},
+		{"nested file after descendant", zipEntry{"Payload/Orchard.app/Nested/value", []byte("value"), 0o600}, zipEntry{"Payload/Orchard.app/Nested", []byte("file"), 0o600}, []string{"archive_file_ancestor"}},
+		{"directory mode without slash", zipEntry{"Payload/Orchard.app/Resources", nil, os.ModeDir | 0o755}, zipEntry{}, []string{"archive_path_kind_mismatch"}},
+		{"file mode with slash", zipEntry{"Payload/Orchard.app/Resources/", nil, 0o600}, zipEntry{}, []string{"archive_path_kind_mismatch"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			entries := append([]zipEntry{}, base...)
+			if tc.first.name != "" {
+				entries = append([]zipEntry{tc.first}, entries...)
+			}
+			if tc.last.name != "" {
+				entries = append(entries, tc.last)
+			}
+			ipa := filepath.Join(t.TempDir(), "bad.ipa")
+			writeIPA(t, ipa, entries)
+			result, err := InspectIPA(context.Background(), ipa, InspectionOptions{CurrentTime: f.now})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Valid() {
+				t.Fatalf("path-kind conflict accepted: %+v", result.Value)
+			}
+			for _, code := range tc.codes {
+				if !hasProblem(result.Problems, code) {
+					t.Fatalf("missing %s: %+v", code, result.Problems)
+				}
+			}
+		})
+	}
+}
+
+func TestInspectIPAAcceptsImplicitAndExplicitDirectories(t *testing.T) {
+	f := newCryptoFixture(t)
+	base := validIPAEntries(t, f.profile(t, profileOptions{}), false)
+	for _, tc := range []struct {
+		name  string
+		extra []zipEntry
+	}{
+		{"implicit", nil},
+		{"explicit", []zipEntry{
+			{"Payload/", nil, os.ModeDir | 0o755},
+			{"Payload/Orchard.app/", nil, os.ModeDir | 0o755},
+			{"Payload/Orchard.app/Resources/", nil, os.ModeDir | 0o755},
+			{"Payload/Orchard.app/Resources/value", []byte("value"), 0o600},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ipa := filepath.Join(t.TempDir(), "valid.ipa")
+			writeIPA(t, ipa, append(append([]zipEntry{}, tc.extra...), base...))
+			result, err := InspectIPA(context.Background(), ipa, InspectionOptions{CurrentTime: f.now})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !result.Valid() || !result.Value.StructureValid {
+				t.Fatalf("valid directory layout rejected: %+v", result.Problems)
+			}
+		})
+	}
+}
+
+func TestExecutableMetadataIsValidatedBeforeBundleOrArchiveRead(t *testing.T) {
+	malformed := []struct {
+		name  string
+		value any
+	}{
+		{"empty", ""},
+		{"invalid type", int64(7)},
+		{"absolute", "/outside"},
+		{"dot", "."},
+		{"dotdot", ".."},
+		{"traversal", "../outside"},
+		{"slash", "sub/Orchard"},
+		{"backslash", `sub\Orchard`},
+		{"nul", "Orchard\x00outside"},
+		{"control", "Orchard\noutside"},
+		{"volume syntax", "C:outside"},
+	}
+	f := newCryptoFixture(t)
+	cms := f.profile(t, profileOptions{})
+	baseEntries := validIPAEntries(t, cms, false)
+	for _, tc := range malformed {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			app := writeBundle(t, dir, false)
+			writePrivate(t, filepath.Join(dir, "outside"), fixtureMachO())
+			if err := os.WriteFile(filepath.Join(app, "Info.plist"), fixtureInfoWith(t, "CFBundleExecutable", tc.value), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			bundle, err := InspectBundle(context.Background(), app, InspectionOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !hasProblem(bundle.Problems, "invalid_executable_name") || bundle.Value.MachO.LoadCommand != "" || hasProblem(bundle.Problems, "invalid_main_executable") {
+				t.Fatalf("directory inspection did not reject before executable read: value=%q report=%+v", tc.value, bundle)
+			}
+
+			entries := append([]zipEntry{}, baseEntries...)
+			for i := range entries {
+				if entries[i].name == "Payload/Orchard.app/Info.plist" {
+					entries[i].data = fixtureInfoWith(t, "CFBundleExecutable", tc.value)
+				}
+			}
+			ipaPath := filepath.Join(dir, "bad.ipa")
+			writeIPA(t, ipaPath, entries)
+			ipa, err := InspectIPA(context.Background(), ipaPath, InspectionOptions{CurrentTime: f.now})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !hasProblem(ipa.Problems, "invalid_executable_name") || ipa.Value.Bundle.MachO.LoadCommand != "" || hasProblem(ipa.Problems, "invalid_main_executable") {
+				t.Fatalf("IPA inspection did not reject before executable lookup: value=%q report=%+v", tc.value, ipa)
+			}
+		})
+	}
+}
+
+func TestInvalidPrimaryIconNameDoesNotReadDerivedOutsidePath(t *testing.T) {
+	dir := t.TempDir()
+	app := writeBundle(t, dir, false)
+	outside := filepath.Join(dir, "outside20x20@2x.png")
+	writePrivate(t, outside, []byte("sentinel-not-a-png"))
+	if err := os.WriteFile(filepath.Join(app, "Info.plist"), fixtureInfoWith(t, "CFBundleIconName", "../outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := InspectBundle(context.Background(), app, InspectionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasProblem(result.Problems, "invalid_primary_icon_name") {
+		t.Fatalf("missing invalid icon-name problem: %+v", result.Problems)
+	}
+	if hasProblem(result.Problems, "invalid_icon_png") || hasProblem(result.Problems, "missing_icon_file") {
+		t.Fatalf("invalid icon stem was used for derived reads: %+v", result.Problems)
+	}
+}
+
 func TestInspectIPARejectsUnsafePermissionsAndIconBytes(t *testing.T) {
 	f := newCryptoFixture(t)
 	for _, tc := range []struct {

@@ -209,6 +209,63 @@ func TestExportStagesAssetsSignsInspectsAndPreservesSource(t *testing.T) {
 	}
 }
 
+func TestPreflightAndExportRejectUnsafeExecutableMetadata(t *testing.T) {
+	fixture := newExportFixture(t, false)
+	if err := os.WriteFile(filepath.Join(fixture.source, "Info.plist"), fixtureInfoWith(t, "CFBundleExecutable", "../../outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	preflight, err := PreflightExport(context.Background(), fixture.request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preflight.Valid() || !hasProblem(preflight.Problems, "invalid_executable_name") {
+		t.Fatalf("unsafe executable metadata passed preflight: %+v", preflight.Problems)
+	}
+	runner := &syntheticZsignRunner{t: t}
+	result, err := Export(context.Background(), fixture.request, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Valid() || !hasProblem(result.Problems, "invalid_executable_name") || len(runner.actions) != 0 {
+		t.Fatalf("unsafe executable metadata reached export actions: result=%+v actions=%+v", result, runner.actions)
+	}
+	if _, err := os.Lstat(fixture.output); !os.IsNotExist(err) {
+		t.Fatalf("unsafe export published output: %v", err)
+	}
+}
+
+func TestExportRejectsSignerArchivePathKindConflict(t *testing.T) {
+	fixture := newExportFixture(t, false)
+	runner := &syntheticZsignRunner{t: t, extraEntries: []zipEntry{{name: "Payload", data: []byte("file"), mode: 0o600}}}
+	result, err := Export(context.Background(), fixture.request, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Valid() || !hasProblem(result.Problems, "archive_file_ancestor") {
+		t.Fatalf("signer path-kind conflict accepted: %+v", result.Problems)
+	}
+	if _, err := os.Lstat(fixture.output); !os.IsNotExist(err) {
+		t.Fatalf("malformed signer output was published: %v", err)
+	}
+}
+
+func TestCanonicalizeIPARejectsArchivePathKindConflict(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source.ipa")
+	destination := filepath.Join(dir, "canonical.ipa")
+	writeIPA(t, source, []zipEntry{
+		{name: "Payload", data: []byte("file"), mode: 0o600},
+		{name: "Payload/Orchard.app/Info.plist", data: fixtureInfo(t, false), mode: 0o600},
+	})
+	err := canonicalizeIPA(context.Background(), source, destination, "Payload/Orchard.app", "Orchard", DefaultLimits())
+	if err == nil || !strings.Contains(err.Error(), "archive_file_ancestor") {
+		t.Fatalf("canonicalization error=%v", err)
+	}
+	if _, statErr := os.Lstat(destination); !os.IsNotExist(statErr) {
+		t.Fatalf("canonicalization created output: %v", statErr)
+	}
+}
+
 func TestExportPublicPlanRedactsPrivatePaths(t *testing.T) {
 	fixture := newExportFixture(t, true)
 	plan, err := PlanExport(context.Background(), fixture.request)

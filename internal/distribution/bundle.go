@@ -197,7 +197,7 @@ func validateCompiledPNG(data []byte, requirement compiledIconRequirement) error
 }
 
 func validateIconMetadata(primary string, names []string) []Problem {
-	if primary == "" || filepath.Base(primary) != primary || strings.ContainsAny(primary, "/\\\x00") {
+	if !validPrimaryIconName(primary) {
 		return []Problem{problem("invalid_primary_icon_name", "CFBundleIconName", "CFBundleIconName must be a nonempty simple filename stem")}
 	}
 	var problems []Problem
@@ -217,10 +217,14 @@ func validateIconMetadata(primary string, names []string) []Problem {
 	return problems
 }
 
+func validPrimaryIconName(primary string) bool {
+	return primary != "" && filepath.Base(primary) == primary && !strings.ContainsAny(primary, "/\\\x00")
+}
+
 func validateArchivedIconFiles(ctx context.Context, entries map[string]*zip.File, appRoot, primary string, names []string, max int64) []Problem {
 	var problems []Problem
 	problems = append(problems, validateIconMetadata(primary, names)...)
-	if primary == "" {
+	if !validPrimaryIconName(primary) {
 		return problems
 	}
 	for _, requirement := range compiledIconRequirements(primary) {
@@ -244,7 +248,7 @@ func validateArchivedIconFiles(ctx context.Context, entries map[string]*zip.File
 func validateDirectoryIconFiles(ctx context.Context, root, primary string, names []string, max int64) []Problem {
 	var problems []Problem
 	problems = append(problems, validateIconMetadata(primary, names)...)
-	if primary == "" {
+	if !validPrimaryIconName(primary) {
 		return problems
 	}
 	for _, requirement := range compiledIconRequirements(primary) {
@@ -284,13 +288,30 @@ func reportFromInfo(info map[string]any) BundleReport {
 	return r
 }
 
+func executableNameFromInfo(info map[string]any) (string, *Problem) {
+	value, present := info["CFBundleExecutable"]
+	name, stringValue := value.(string)
+	if !present || !stringValue || !validExecutableName(name) {
+		p := problem("invalid_executable_name", "CFBundleExecutable", "CFBundleExecutable must be a nonempty simple filename with no absolute, traversal, separator, volume, NUL, or control syntax")
+		return name, &p
+	}
+	return name, nil
+}
+
+func validExecutableName(name string) bool {
+	windowsVolume := len(name) >= 2 && name[1] == ':' && ((name[0] >= 'A' && name[0] <= 'Z') || (name[0] >= 'a' && name[0] <= 'z'))
+	hasControl := strings.IndexFunc(name, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0
+	return name != "" && name != "." && name != ".." && !windowsVolume && !hasControl &&
+		!path.IsAbs(name) && !filepath.IsAbs(name) && path.Clean(name) == name && filepath.Clean(name) == name &&
+		path.Base(name) == name && filepath.Base(name) == name && !strings.ContainsAny(name, "/\\\x00")
+}
+
 func validateBundleReport(r BundleReport, requireIcons bool) []Problem {
 	var ps []Problem
 	required := []struct{ value, field, code string }{
 		{r.BundleIdentifier, "CFBundleIdentifier", "missing_bundle_identifier"},
 		{r.MarketingVersion, "CFBundleShortVersionString", "missing_marketing_version"},
 		{r.BuildNumber, "CFBundleVersion", "missing_build_number"},
-		{r.Executable, "CFBundleExecutable", "missing_executable"},
 		{r.MinimumOSVersion, "MinimumOSVersion", "missing_minimum_os"},
 	}
 	for _, req := range required {
@@ -361,6 +382,111 @@ func safeArchiveName(name string) error {
 		return errors.New("archive name traverses or is not clean")
 	}
 	return nil
+}
+
+type archivePathKind uint8
+
+const (
+	archivePathFile archivePathKind = iota + 1
+	archivePathDirectory
+)
+
+type archivePathNode struct {
+	entry *zip.File
+	kind  archivePathKind
+}
+
+type archivePathIndex struct {
+	entries map[string]*zip.File
+	nodes   map[string]archivePathNode
+}
+
+func encodedArchivePathKind(entry *zip.File) (archivePathKind, bool) {
+	mode := entry.Mode()
+	kind := archivePathFile
+	if mode.IsDir() {
+		kind = archivePathDirectory
+	}
+	// archive/zip treats every trailing-slash name as a directory in Mode(),
+	// even when Unix attributes explicitly describe a regular file. Preserve
+	// that encoded distinction so spelling and kind can be compared.
+	creator := entry.CreatorVersion >> 8
+	if creator == 3 || creator == 19 { // Unix or macOS creator identifiers.
+		switch (entry.ExternalAttrs >> 16) & 0o170000 {
+		case 0o100000:
+			kind = archivePathFile
+		case 0o040000:
+			kind = archivePathDirectory
+		case 0:
+			// Fall through to the portable mode derived by archive/zip.
+		default:
+			return 0, false
+		}
+	}
+	if !mode.IsDir() && !mode.IsRegular() {
+		return 0, false
+	}
+	return kind, true
+}
+
+func indexArchivePaths(files []*zip.File) (archivePathIndex, []Problem) {
+	index := archivePathIndex{entries: map[string]*zip.File{}, nodes: map[string]archivePathNode{}}
+	var problems []Problem
+	for _, entry := range files {
+		if err := safeArchiveName(entry.Name); err != nil {
+			problems = append(problems, problem("unsafe_archive_name", entry.Name, err.Error()))
+			continue
+		}
+		if _, exists := index.entries[entry.Name]; exists {
+			problems = append(problems, problem("duplicate_archive_entry", entry.Name, "duplicate archive entry"))
+			continue
+		}
+		index.entries[entry.Name] = entry
+		kind, supported := encodedArchivePathKind(entry)
+		if !supported {
+			problems = append(problems, problem("unsafe_archive_entry_type", entry.Name, "archive entries must be regular files or directories"))
+			continue
+		}
+		spellsDirectory := strings.HasSuffix(entry.Name, "/")
+		if spellsDirectory != (kind == archivePathDirectory) {
+			problems = append(problems, problem("archive_path_kind_mismatch", entry.Name, "archive entry directory spelling and encoded file type disagree"))
+		}
+		normalized := strings.TrimSuffix(entry.Name, "/")
+		if prior, exists := index.nodes[normalized]; exists {
+			problems = append(problems, problem("archive_path_kind_collision", entry.Name, fmt.Sprintf("archive path collides with %q after directory normalization", prior.entry.Name)))
+			continue
+		}
+		index.nodes[normalized] = archivePathNode{entry: entry, kind: kind}
+	}
+
+	names := make([]string, 0, len(index.nodes))
+	for name := range index.nodes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	reportedAncestors := map[string]bool{}
+	for _, name := range names {
+		for parent := path.Dir(name); parent != "." && parent != "/"; parent = path.Dir(parent) {
+			if ancestor, exists := index.nodes[parent]; exists && ancestor.kind == archivePathFile {
+				if !reportedAncestors[parent] {
+					problems = append(problems, problem("archive_file_ancestor", name, fmt.Sprintf("regular file %q is an ancestor of another archive entry", ancestor.entry.Name)))
+					reportedAncestors[parent] = true
+				}
+				break
+			}
+		}
+	}
+	return index, problems
+}
+
+func requiredArchiveDirectoryProblems(index archivePathIndex, names ...string) []Problem {
+	var problems []Problem
+	for _, name := range names {
+		if node, exists := index.nodes[name]; exists && node.kind != archivePathDirectory {
+			problems = append(problems, problem("archive_required_directory", node.entry.Name, fmt.Sprintf("archive path %q must be a directory when explicitly present", name)))
+		}
+	}
+	return problems
 }
 
 func readZipEntry(ctx context.Context, f *zip.File, max int64) ([]byte, error) {
@@ -440,24 +566,16 @@ func inspectIPA(ctx context.Context, ipaPath string, options InspectionOptions, 
 	if len(zr.File) > limits.MaxArchiveEntries {
 		return out, fmt.Errorf("IPA has %d entries; limit is %d", len(zr.File), limits.MaxArchiveEntries)
 	}
-	entries := map[string]*zip.File{}
+	archiveIndex, archiveProblems := indexArchivePaths(zr.File)
+	out.Problems = append(out.Problems, archiveProblems...)
+	entries := archiveIndex.entries
 	apps := map[string]bool{}
 	for _, zf := range zr.File {
 		if err := checkContext(ctx); err != nil {
 			return out, err
 		}
-		if err := safeArchiveName(zf.Name); err != nil {
-			out.Problems = append(out.Problems, problem("unsafe_archive_name", zf.Name, err.Error()))
+		if entries[zf.Name] != zf {
 			continue
-		}
-		if _, exists := entries[zf.Name]; exists {
-			out.Problems = append(out.Problems, problem("duplicate_archive_entry", zf.Name, "duplicate archive entry"))
-			continue
-		}
-		entries[zf.Name] = zf
-		mode := zf.Mode()
-		if !mode.IsDir() && !mode.IsRegular() {
-			out.Problems = append(out.Problems, problem("unsafe_archive_entry_type", zf.Name, "archive entries must be regular files or directories"))
 		}
 		if zf.UncompressedSize64 > uint64(limits.MaxFileBytes) {
 			out.Problems = append(out.Problems, problem("archive_entry_too_large", zf.Name, "archive entry exceeds per-file limit"))
@@ -477,6 +595,7 @@ func inspectIPA(ctx context.Context, ipaPath string, options InspectionOptions, 
 			apps["Payload/"+parts[1]] = true
 		}
 	}
+	out.Problems = append(out.Problems, requiredArchiveDirectoryProblems(archiveIndex, "Payload")...)
 	if len(apps) != 1 {
 		out.Problems = append(out.Problems, problem("main_bundle_count", "Payload", fmt.Sprintf("IPA must contain exactly one main Payload/*.app; found %d", len(apps))))
 		return out, nil
@@ -485,6 +604,7 @@ func inspectIPA(ctx context.Context, ipaPath string, options InspectionOptions, 
 	for appRoot = range apps {
 	}
 	out.Value.Bundle.AppDirectory = appRoot
+	out.Problems = append(out.Problems, requiredArchiveDirectoryProblems(archiveIndex, appRoot)...)
 	for name, entry := range entries {
 		trimmed := strings.TrimSuffix(name, "/")
 		if trimmed != "Payload" && trimmed != appRoot && !strings.HasPrefix(trimmed, appRoot+"/") {
@@ -528,8 +648,11 @@ func inspectIPA(ctx context.Context, ipaPath string, options InspectionOptions, 
 	out.Value.Bundle = reportFromInfo(infoPlist)
 	out.Value.Bundle.AppDirectory = appRoot
 	out.Value.Bundle.CodeSignature = CodeSignatureReport{CodeResourcesPresent: entries[appRoot+"/_CodeSignature/CodeResources"] != nil, Verification: "not_performed"}
-	if out.Value.Bundle.Executable != "" {
-		execEntry := entries[appRoot+"/"+out.Value.Bundle.Executable]
+	executable, executableProblem := executableNameFromInfo(infoPlist)
+	if executableProblem != nil {
+		out.Problems = append(out.Problems, *executableProblem)
+	} else {
+		execEntry := entries[appRoot+"/"+executable]
 		if execEntry == nil {
 			out.Problems = append(out.Problems, problem("missing_main_executable", "CFBundleExecutable", "declared main executable is absent"))
 		} else {
@@ -577,13 +700,17 @@ func inspectBundleDirectory(ctx context.Context, root string, limits Limits, req
 	}
 	out.Value = reportFromInfo(info)
 	out.Value.AppDirectory = filepath.Base(root)
+	executable, executableProblem := executableNameFromInfo(info)
+	if executableProblem != nil {
+		out.Problems = append(out.Problems, *executableProblem)
+	}
 	if signature, _, err := openRegularNoFollow(filepath.Join(root, "_CodeSignature", "CodeResources")); err == nil {
 		out.Value.CodeSignature.CodeResourcesPresent = true
 		_ = signature.Close()
 	}
 	out.Value.CodeSignature.Verification = "not_performed"
-	if out.Value.Executable != "" {
-		execData, err := readRegularFile(ctx, filepath.Join(root, out.Value.Executable), limits.MaxFileBytes)
+	if executableProblem == nil {
+		execData, err := readRegularFile(ctx, filepath.Join(root, executable), limits.MaxFileBytes)
 		if err != nil {
 			out.Problems = append(out.Problems, problem("missing_main_executable", "CFBundleExecutable", err.Error()))
 		} else {

@@ -221,6 +221,20 @@ func fixtureInfo(t *testing.T, binaryFormat bool) []byte {
 	return b
 }
 
+func fixtureInfoWith(t *testing.T, key string, value any) []byte {
+	t.Helper()
+	var info map[string]any
+	if _, err := plist.Unmarshal(fixtureInfo(t, false), &info); err != nil {
+		t.Fatal(err)
+	}
+	info[key] = value
+	b, err := plist.Marshal(info, plist.BinaryFormat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
 func writeBundle(t *testing.T, dir string, binaryInfo bool) string {
 	t.Helper()
 	app := filepath.Join(dir, "Orchard.app")
