@@ -4,6 +4,8 @@ set -eu
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 containerfile=$repo_root/packaging/Containerfile
 entrypoint=$repo_root/packaging/container-entrypoint
+context_probe=$repo_root/packaging/container-context-probe.sh
+context_containerfile=$repo_root/packaging/tests/Containerfile.context
 workflow=$repo_root/.github/workflows/ci.yml
 
 assert_contains() {
@@ -17,7 +19,7 @@ assert_contains() {
 
 cmp "$repo_root/.dockerignore" "$repo_root/.containerignore"
 sh -n "$entrypoint"
-sh -n "$repo_root/packaging/container-context-probe.sh"
+sh -n "$context_probe"
 test -s "$repo_root/THIRD_PARTY_NOTICES.md"
 test -d "$repo_root/docs/third-party"
 
@@ -53,6 +55,15 @@ assert_contains '!/*.go' "$repo_root/.dockerignore"
 assert_contains '!catalog/**' "$repo_root/.dockerignore"
 assert_contains '!THIRD_PARTY_NOTICES.md' "$repo_root/.dockerignore"
 assert_contains '!docs/third-party/**' "$repo_root/.dockerignore"
+assert_contains '**/.git/**' "$repo_root/.dockerignore"
+assert_contains '**/.sandcastle/**' "$repo_root/.dockerignore"
+assert_contains '**/.workflow/**' "$repo_root/.dockerignore"
+assert_contains ': > "$probe_root/internal/.git/config"' "$context_probe"
+assert_contains ': > "$probe_root/internal/.sandcastle/context-marker"' "$context_probe"
+assert_contains ': > "$probe_root/internal/.workflow/context-marker"' "$context_probe"
+assert_contains 'test ! -e /context/internal/.git/config' "$context_containerfile"
+assert_contains 'test ! -e /context/internal/.sandcastle/context-marker' "$context_containerfile"
+assert_contains 'test ! -e /context/internal/.workflow/context-marker' "$context_containerfile"
 assert_contains '*.xip' "$repo_root/.dockerignore"
 assert_contains '**/*.xip' "$repo_root/.dockerignore"
 assert_contains '*.mobileprovision' "$repo_root/.dockerignore"

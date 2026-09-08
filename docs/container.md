@@ -121,20 +121,47 @@ orchard_container doctor
 that an iOS SDK is installed, a native iOS build works, a physical device can be
 used, signing is valid, or Apple accepts an artifact.
 
-This packet deliberately does not invent the future tool-install integration.
-After the final CLI schema advertises `tools install`, the concrete onboarding
-flow will be a reviewed preview followed by explicit execution in the same
-mounted state, for example:
+Install each managed tool with a reviewed JSON preview followed by explicit
+execution. Each invocation uses the same private state mount, so installed tool
+metadata and binaries persist across container runs:
 
 ```sh
-# Available only after tools-install integration; confirm with `orchard schema --json`.
 orchard_container tools install xtool --json
 orchard_container tools install xtool --execute
+orchard_container tools install asc --json
+orchard_container tools install asc --execute
+orchard_container tools install zsign --json
+orchard_container tools install zsign --execute
 ```
 
-Until that command exists in the integrated CLI, follow the HTTPS guidance from
-`doctor` and do not treat the example as an implemented command. The image does
-not preinstall xtool, ASC, or zsign.
+The image does not preinstall xtool, ASC, or zsign. `tools install` downloads the
+architecture-appropriate release selected by Orchard's pinned tool manifest,
+verifies it, and installs it into user-owned persisted state; it does not invoke
+`sudo` or mutate the host installation.
+
+The image does include the Orchard AssetKit bridge and unxip helper. Register
+their absolute container paths with the revisions that identify their reviewed
+dependencies, again previewing each local state change before execution:
+
+```sh
+orchard_container tools register orchard-assets \
+  --path /usr/local/bin/orchard-assets \
+  --assetkit-revision e763558b55fcbb5a443b1d7b2c6f0972d8bd14f7 --json
+orchard_container tools register orchard-assets \
+  --path /usr/local/bin/orchard-assets \
+  --assetkit-revision e763558b55fcbb5a443b1d7b2c6f0972d8bd14f7 --execute
+orchard_container tools register unxip \
+  --path /usr/local/bin/unxip \
+  --source-revision 6c3990517fcc4c1db6952fccf4c562fb14097601 --json
+orchard_container tools register unxip \
+  --path /usr/local/bin/unxip \
+  --source-revision 6c3990517fcc4c1db6952fccf4c562fb14097601 --execute
+```
+
+The AssetKit revision is the exact `Package.resolved` pin. The registration
+deliberately omits an Orchard bridge `--source-revision`: a source checkout path
+does not establish the commit used to build the image. Helper usage is exposed
+with `--help`; `orchard-assets` does not provide a `--version` contract.
 
 The `unxip` executable is a separate upstream program, not code linked into
 Orchard. Its `--version` and `--help` contracts and dynamic libraries are checked
@@ -165,41 +192,56 @@ Ctrl-C when finished.
 ## SDK and signing inputs
 
 Apple SDK and signing configuration belong only in the private state mount.
-Operator-supplied source material should enter through a separate, narrowly
-selected read-only mount rather than through the image build or host home:
+Keep every operator-supplied Xcode archive, SDK source, private key,
+certificate, profile, and pairing record outside the Orchard source and project
+directories, and never copy it into an image layer. The [native Linux setup
+guide](setup.md) covers the licensing and prerequisite boundaries.
+
+Select only the directory containing the permitted, separately authenticated
+SDK source and expose it read-only at `/input`. This second wrapper uses the
+same absolute state and workspace mounts as `orchard_container`, while adding
+only that narrow input mount:
 
 ```sh
-input_dir=/absolute/path/to/reviewed-inputs
-podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
-  --volume "$state_dir:/var/lib/orchard:Z" \
-  --volume "$workspace_dir:/workspace:Z" \
-  --volume "$input_dir:/input:ro,Z" \
-  localhost/orchard:local orchard schema --json
+input_dir=/absolute/path/to/reviewed-sdk-input
+test "${input_dir#/}" != "$input_dir"
+test -d "$input_dir"
+
+orchard_container_with_input() {
+  podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
+    --volume "$state_dir:/var/lib/orchard:Z" \
+    --volume "$workspace_dir:/workspace:Z" \
+    --volume "$input_dir:/input:ro,Z" \
+    localhost/orchard:local orchard "$@"
+}
 ```
 
-Replace the final command only with a reviewed, implemented import/setup
-operation. Keep the selected input directory mode 0700. Never copy an Xcode XIP,
-SDK, private key, certificate, profile, or pairing record into the source tree
-or image. Swift remains installed in the runtime for Linux-native iOS
-cross-compilation after the operator explicitly configures a permitted SDK.
-
-For a permitted, separately authenticated Xcode download, the included unxip
-can extract the complete XIP into a fresh directory in private state while
-preserving the archive's original Xcode metadata:
+Choose the architecture matching the running Linux image (`arm64` or
+`x86_64`). Preview the complete import before executing it; replace the example
+input name with the actual path beneath the read-only mount:
 
 ```sh
-podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
-  --volume "$state_dir:/var/lib/orchard:Z" \
-  --volume "$input_dir:/input:ro,Z" \
-  localhost/orchard:local \
-  unxip --statistics /input/Xcode.xip /var/lib/orchard/xcode-import
+sdk_arch=arm64
+orchard_container_with_input sdk import \
+  --input /input/Xcode.xip --arch "$sdk_arch" --json
+orchard_container_with_input sdk import \
+  --input /input/Xcode.xip --arch "$sdk_arch" --execute
 ```
 
-`/var/lib/orchard/xcode-import` must not exist before this command. Use the
-equivalent Docker identity and volume syntax described above when using Docker.
-unxip does not authenticate the XIP; validate the operator-supplied download by
-an appropriate independent mechanism before extraction. Extraction alone does
-not configure an SDK or prove a native iOS build.
+The entrypoint sets the absolute `XDG_CONFIG_HOME` beneath
+`/var/lib/orchard`, so preview, import, SDK discovery, and later builds use the
+same persisted configuration. Execution extracts into fresh user-owned state,
+builds a fresh `darwin.artifactbundle`, stages the selected host Clang resource
+headers as user-owned files, and installs the result with native
+`swift sdk install`. It preserves both the original read-only Apple input and
+existing private state, and refuses to replace an installed SDK. Do not run
+`xtool sdk install` or `sudo` for this workflow.
+
+For Docker, define the same wrapper with `docker run`, omit
+`--userns=keep-id` and the `:Z` suffixes, and retain the same three mount paths.
+Keep the selected host input directory mode 0700. An SDK import establishes
+local setup only; it does not prove a native app build, device operation,
+signing validity, or Apple acceptance.
 
 ## unxip source and rebuilding
 

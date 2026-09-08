@@ -23,10 +23,16 @@
 # Repository and local orchestration metadata.
 .git
 .git/**
+**/.git
+**/.git/**
 .sandcastle
 .sandcastle/**
+**/.sandcastle
+**/.sandcastle/**
 .workflow
 .workflow/**
+**/.workflow
+**/.workflow/**
 
 # Private state and build/dependency caches.
 .orchard

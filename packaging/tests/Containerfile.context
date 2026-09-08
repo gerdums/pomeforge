@@ -7,6 +7,9 @@ RUN test -f /context/go.mod \
     && test -f /context/internal/context-allowed.go \
     && test ! -e /context/.git/context-sentinel \
     && test ! -e /context/.sandcastle/context-sentinel \
+    && test ! -e /context/internal/.git/config \
+    && test ! -e /context/internal/.sandcastle/context-marker \
+    && test ! -e /context/internal/.workflow/context-marker \
     && test ! -e /context/.orchard/context-sentinel \
     && test ! -e /context/.cache/context-sentinel \
     && test ! -e /context/.swiftpm/context-sentinel \
