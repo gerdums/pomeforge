@@ -47,6 +47,7 @@ func TestInspectIPARejectsUnsafeArchives(t *testing.T) {
 		{"backslash", "unsafe_archive_name", []zipEntry{{`Payload\\bad`, []byte("x"), 0o600}}, false},
 		{"duplicate", "duplicate_archive_entry", []zipEntry{{"Payload/Orchard.app/Info.plist", fixtureInfo(t, false), 0o600}}, false},
 		{"symlink", "unsafe_archive_entry_type", []zipEntry{{"Payload/Orchard.app/link", []byte("target"), os.ModeSymlink | 0o777}}, false},
+		{"symlink with trailing slash", "unsafe_archive_entry_type", []zipEntry{{"Payload/Orchard.app/link/", nil, os.ModeSymlink | 0o777}}, false},
 		{"nested extension", "unsupported_nested_extension", []zipEntry{{"Payload/Orchard.app/PlugIns/Widget.appex/Info.plist", []byte("x"), 0o600}}, false},
 		{"extraneous top-level", "unsupported_archive_entry", []zipEntry{{"scratch/private-key.pem", []byte("secret"), 0o600}}, false},
 		{"framework", "unsupported_nested_framework", []zipEntry{{"Payload/Orchard.app/Frameworks/Kit.framework/Kit", []byte("x"), 0o700}}, false},
