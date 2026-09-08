@@ -289,6 +289,38 @@ class ReleaseTests(unittest.TestCase):
         self.assertFalse(prefix.exists())
         installer.verify(bundle)
 
+    def test_portable_preserves_existing_integration_files_before_writes(self):
+        bundle, env = self.portable_fixture()
+        prefix = self.root / "new-install"
+        data = Path(env["HOME"]) / ".local/share"
+        for relative in ("applications/pomeforge.desktop", "applications/pomeforge-setup.desktop", "icons/hicolor/scalable/apps/pomeforge.svg"):
+            with self.subTest(relative=relative):
+                destination = data / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(b"unrelated existing file")
+                result = subprocess.run([sys.executable, str(bundle / "install.py"), "--prefix", str(prefix)], env=env, text=True, capture_output=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Refusing to replace", result.stderr)
+                self.assertEqual(destination.read_bytes(), b"unrelated existing file")
+                self.assertFalse(prefix.exists())
+                self.assertFalse((Path(env["HOME"]) / ".local/bin").exists())
+                destination.unlink()
+        installer.verify(bundle)
+
+    def test_integration_publication_does_not_replace_raced_file(self):
+        destination = self.root / "pomeforge.desktop"
+        original_link = os.link
+
+        def publish_competing_file(source, target):
+            destination.write_bytes(b"concurrent unrelated file")
+            return original_link(source, target)
+
+        with mock.patch.object(installer.os, "link", side_effect=publish_competing_file):
+            with self.assertRaisesRegex(RuntimeError, "Refusing to replace"):
+                installer.install_integration_file(destination, b"new desktop entry")
+        self.assertEqual(destination.read_bytes(), b"concurrent unrelated file")
+        self.assertEqual(list(self.root.iterdir()), [destination])
+
 
 if __name__ == "__main__":
     if sys.platform != "linux":

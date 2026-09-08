@@ -409,7 +409,9 @@ func TestServeAppBrowserOpenerEnvironment(t *testing.T) {
 	toolsDirectory := t.TempDir()
 	environmentFile := filepath.Join(t.TempDir(), "opener-environment")
 	opener := filepath.Join(toolsDirectory, "xdg-open")
-	if err := os.WriteFile(opener, []byte("#!/bin/sh\nenv > '"+environmentFile+"'\n"), 0o700); err != nil {
+	// Publish only the completed environment: shell redirection creates an empty
+	// file before env writes, so its mere existence is not a completion signal.
+	if err := os.WriteFile(opener, []byte("#!/bin/sh\nenv > '"+environmentFile+".tmp' && mv '"+environmentFile+".tmp' '"+environmentFile+"'\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", toolsDirectory+":/usr/bin:/bin")

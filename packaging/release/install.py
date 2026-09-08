@@ -47,6 +47,44 @@ def desktop_exec(path):
     return '"' + "".join("\\\\\\\\" if c == "\\" else "\\\\" + c if c in ('"', "$", "`") else c for c in value) + '"'
 
 
+def integration_matches(path, contents):
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        if path.is_symlink():
+            raise RuntimeError("Refusing to replace an existing integration file: " + str(path))
+        return False
+    except OSError as error:
+        raise RuntimeError("Cannot safely read integration destination: " + str(path)) from error
+    with os.fdopen(descriptor, "rb") as stream:
+        metadata = os.fstat(stream.fileno())
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size != len(contents) or stream.read(len(contents) + 1) != contents:
+            raise RuntimeError("Refusing to replace an existing integration file: " + str(path))
+    return True
+
+
+def install_integration_file(path, contents):
+    if integration_matches(path, contents):
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    staged = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="wb", dir=path.parent, prefix=".pomeforge-", delete=False) as stream:
+            staged = Path(stream.name)
+            stream.write(contents)
+        staged.chmod(0o644)
+        try:
+            os.link(staged, path)
+        except FileExistsError:
+            # A concurrent installation may have published identical bytes.
+            # An unrelated file or symlink must never be replaced.
+            if not integration_matches(path, contents):
+                raise RuntimeError("Integration destination changed during installation: " + str(path))
+    finally:
+        if staged is not None:
+            staged.unlink()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prefix", type=Path, help="User-owned application directory (must not contain unrelated files)")
@@ -78,6 +116,15 @@ def main():
         link = user_bin / name
         if (link.exists() or link.is_symlink()) and (not link.is_symlink() or os.readlink(link) != str(target)):
             raise RuntimeError("Refusing to replace an existing command: " + str(link))
+    applications = data / "applications"
+    base = "[Desktop Entry]\nType=Application\nVersion=1.0\nIcon=pomeforge\nCategories=Development;IDE;\n"
+    integration = {
+        data / "icons/hicolor/scalable/apps/pomeforge.svg": (bundle / "share/pomeforge.svg").read_bytes(),
+        applications / "pomeforge.desktop": (base + "Name=Pomeforge Workspace\nExec=" + exec_gui + "\nTerminal=false\nStartupNotify=true\n").encode(),
+        applications / "pomeforge-setup.desktop": (base + "Name=Pomeforge Setup\nExec=" + exec_setup + "\nTerminal=true\nStartupNotify=false\n").encode(),
+    }
+    for destination, contents in integration.items():
+        integration_matches(destination, contents)
     if prefix.exists():
         verify(prefix)
         if sha256(prefix / "share/package-manifest.json") != sha256(bundle / "share/package-manifest.json"):
@@ -99,26 +146,8 @@ def main():
         link = user_bin / name
         if not link.is_symlink():
             link.symlink_to(target)
-    applications = data / "applications"
-    applications.mkdir(parents=True, exist_ok=True)
-    icon = data / "icons/hicolor/scalable/apps/pomeforge.svg"
-    icon.parent.mkdir(parents=True, exist_ok=True)
-    if icon.is_symlink():
-        raise RuntimeError("Icon destination cannot be a symlink.")
-    shutil.copyfile(prefix / "share/pomeforge.svg", icon)
-    base = "[Desktop Entry]\nType=Application\nVersion=1.0\nIcon=pomeforge\nCategories=Development;IDE;\n"
-    for name, contents in {
-        "pomeforge.desktop": base + "Name=Pomeforge Workspace\nExec=" + exec_gui + "\nTerminal=false\nStartupNotify=true\n",
-        "pomeforge-setup.desktop": base + "Name=Pomeforge Setup\nExec=" + exec_setup + "\nTerminal=true\nStartupNotify=false\n",
-    }.items():
-        destination = applications / name
-        if destination.is_symlink():
-            raise RuntimeError("Desktop entry destination cannot be a symlink.")
-        with tempfile.NamedTemporaryFile(mode="w", dir=applications, prefix=".pomeforge-", delete=False) as stream:
-            stream.write(contents)
-            staged = Path(stream.name)
-        staged.chmod(0o644)
-        staged.replace(destination)
+    for destination, contents in integration.items():
+        install_integration_file(destination, contents)
     print("Pomeforge is installed at " + str(prefix))
     print("If needed, add commands to this terminal: export PATH=" + shlex.quote(str(user_bin)) + ':"$PATH"')
     print("Start setup: " + shlex.quote(str(user_bin / "pomeforge")) + " quickstart")
