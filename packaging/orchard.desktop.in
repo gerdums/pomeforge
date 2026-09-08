@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Orchard
+GenericName=iOS Development Workspace
+Comment=Open the local Orchard development workspace
+Exec=@ORCHARD_LAUNCHER@
+Icon=orchard
+Terminal=false
+Categories=Development;IDE;
+StartupNotify=true
+Keywords=Swift;iOS;iPhone;iPad;xtool;

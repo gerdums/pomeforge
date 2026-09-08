@@ -1,0 +1,27 @@
+#!/bin/sh
+set -eu
+
+if [ -n "${XDG_DATA_HOME:-}" ]; then
+  orchard_data_home=$XDG_DATA_HOME
+else
+  orchard_data_home=$HOME/.local/share
+fi
+
+orchard_binary=$orchard_data_home/orchard/bin/orchard
+if [ ! -x "$orchard_binary" ]; then
+  printf '%s\n' "Orchard is not installed at: $orchard_binary" >&2
+  printf '%s\n' "Run the user-local Orchard installer again with a prebuilt binary." >&2
+  exit 1
+fi
+
+if [ -n "${ORCHARD_WORKSPACE:-}" ]; then
+  orchard_workspace=$ORCHARD_WORKSPACE
+else
+  orchard_workspace=$orchard_data_home/orchard/workspace
+fi
+
+mkdir -p -- "$orchard_workspace"
+
+# Orchard opens the authenticated URL only after binding the loopback listener.
+# Its token-bearing output is deliberately left untouched.
+exec "$orchard_binary" app --open --workspace "$orchard_workspace" --listen 127.0.0.1:0

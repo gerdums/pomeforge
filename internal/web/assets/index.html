@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#171a18">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'self'">
+  <title>Orchard workspace</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#workspace">Skip to workspace</a>
+
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#workspace" aria-label="Orchard workspace home">
+        <svg class="brand-mark" viewBox="0 0 36 36" aria-hidden="true">
+          <circle cx="18" cy="19" r="11.5" fill="none" stroke="currentColor" stroke-width="2.2"/>
+          <path d="M18 8c0-4 2.6-6.1 6.7-6.1-.2 4.2-2.5 6.2-6.7 6.1Z" fill="currentColor"/>
+          <path d="M18 8.2c-2-2.4-4.4-3.4-7.2-2.9" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2.2"/>
+        </svg>
+        <span>Orchard</span>
+      </a>
+      <p id="connection-status" class="connection-status" aria-live="polite">Connecting…</p>
+    </header>
+
+    <aside class="sidebar" aria-label="Workspace navigation">
+      <div class="sidebar-section project-switcher">
+        <div class="section-heading-row">
+          <label for="project-select">Project</label>
+          <button id="open-create-project" class="icon-button" type="button" aria-label="Create project" title="Create project">+</button>
+        </div>
+        <select id="project-select" disabled>
+          <option value="">Loading projects…</option>
+        </select>
+        <p id="project-path" class="secondary sidebar-path">Waiting for workspace</p>
+      </div>
+
+      <nav class="view-tabs" aria-label="Orchard sections">
+        <button class="view-tab is-active" type="button" data-view="work" aria-current="page">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4.5h14v11H3zM6 8l2.5 2L6 12m4 0h4"/></svg>
+          <span>Work</span>
+        </button>
+        <button class="view-tab" type="button" data-view="prerequisites">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.8a7.2 7.2 0 1 0 0 14.4 7.2 7.2 0 0 0 0-14.4ZM10 6v4l2.7 1.7"/></svg>
+          <span>Prerequisites</span>
+        </button>
+        <button class="view-tab" type="button" data-view="results">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h12v13H4zM7 7h6M7 10h6M7 13h4"/></svg>
+          <span>Results</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <span id="app-version">Version unavailable</span>
+        <span id="workspace-path">Local workspace</span>
+      </div>
+    </aside>
+
+    <main id="workspace" tabindex="-1">
+      <div id="app-alert" class="app-alert" role="alert" hidden>
+        <div>
+          <strong id="alert-title">Unable to connect</strong>
+          <p id="alert-message"></p>
+        </div>
+        <button id="retry-connection" class="secondary-button" type="button">Retry connection</button>
+      </div>
+
+      <section id="work-view" class="view is-active" aria-labelledby="work-title">
+        <header class="view-header">
+          <div>
+            <p class="eyebrow">Current project</p>
+            <h1 id="work-title">Choose a project</h1>
+            <p id="project-summary" class="lede">Select an existing project or create one to inspect an operation.</p>
+          </div>
+          <button id="header-create-project" class="secondary-button" type="button">Create project</button>
+        </header>
+
+        <div id="empty-projects" class="empty-state" hidden>
+          <svg viewBox="0 0 56 56" aria-hidden="true"><path d="M9 16.5h14l4 5h20v25H9zM17 16.5V10h15l4 5"/></svg>
+          <h2>No projects yet</h2>
+          <p>Create an xtool Swift package inside this workspace. Orchard will never overwrite an existing directory.</p>
+          <button id="empty-create-project" class="primary-button" type="button">Create first project</button>
+        </div>
+
+        <div id="work-content" class="work-layout" hidden>
+          <section class="operation-panel" aria-labelledby="operation-title">
+            <div class="section-heading">
+              <p class="step-number">01</p>
+              <div>
+                <h2 id="operation-title">Choose an operation</h2>
+                <p>Select what Orchard should prepare. Nothing runs while reviewing a plan.</p>
+              </div>
+            </div>
+
+            <div class="form-grid">
+              <div class="field full-field">
+                <label for="action-select">Operation</label>
+                <select id="action-select" disabled>
+                  <option value="">Choose an operation</option>
+                </select>
+                <p id="action-description" class="field-help">Available operations come from Orchard’s current capabilities.</p>
+              </div>
+              <div id="ipa-field" class="field" hidden>
+                <label for="ipa-input">IPA path <span>optional</span></label>
+                <input id="ipa-input" type="text" autocomplete="off" placeholder="build/My App.ipa">
+                <p class="field-help">Relative to the selected project unless the operation says otherwise.</p>
+              </div>
+              <div id="device-field" class="field" hidden>
+                <label for="device-input">Device identifier <span>optional</span></label>
+                <input id="device-input" type="text" autocomplete="off" placeholder="00008110-…">
+                <p class="field-help">Leave empty when only one eligible device is connected.</p>
+              </div>
+            </div>
+
+            <div class="button-row">
+              <button id="review-plan" class="primary-button" type="button" disabled>Review plan</button>
+              <p id="plan-status" class="inline-status" aria-live="polite">Choose an operation to continue.</p>
+            </div>
+          </section>
+
+          <section id="plan-panel" class="plan-panel" aria-labelledby="plan-title" hidden>
+            <div class="section-heading">
+              <p class="step-number">02</p>
+              <div>
+                <h2 id="plan-title">Inspect the plan</h2>
+                <p id="plan-summary">Review the exact program and argument boundaries before execution.</p>
+              </div>
+            </div>
+
+            <div id="plan-blockers" class="notice notice-blocked" hidden>
+              <strong>Blocked</strong>
+              <ul id="blocker-list"></ul>
+            </div>
+            <div id="plan-warnings" class="notice notice-warning" hidden>
+              <strong>Warnings</strong>
+              <ul id="warning-list"></ul>
+            </div>
+
+            <div id="plan-steps" class="plan-steps"></div>
+
+            <label id="confirmation-field" class="confirmation" hidden>
+              <input id="confirm-execution" type="checkbox">
+              <span>I understand this operation may modify external state and I confirm execution.</span>
+            </label>
+
+            <div class="button-row plan-actions">
+              <button id="run-plan" class="primary-button" type="button" disabled>Run operation</button>
+              <p id="execution-status" class="inline-status" aria-live="polite"></p>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="prerequisites-view" class="view" aria-labelledby="prerequisites-title" hidden>
+        <header class="view-header">
+          <div>
+            <p class="eyebrow">Environment</p>
+            <h1 id="prerequisites-title">Prerequisites</h1>
+            <p class="lede">Tool availability and capability limits reported by the local Orchard process.</p>
+          </div>
+          <button id="refresh-diagnostics" class="secondary-button" type="button">Refresh diagnostics</button>
+        </header>
+
+        <section aria-labelledby="tools-title">
+          <div class="subsection-header">
+            <h2 id="tools-title">Tool diagnostics</h2>
+            <p id="tool-count" class="secondary"></p>
+          </div>
+          <div id="tool-list" class="diagnostic-list"></div>
+        </section>
+
+        <section class="capability-section" aria-labelledby="capabilities-title">
+          <div class="subsection-header">
+            <h2 id="capabilities-title">Capability limitations</h2>
+            <p class="secondary">Orchard stops when a required tool or entitlement is unavailable.</p>
+          </div>
+          <div id="capability-list" class="diagnostic-list"></div>
+        </section>
+      </section>
+
+      <section id="results-view" class="view" aria-labelledby="results-title" hidden>
+        <header class="view-header">
+          <div>
+            <p class="eyebrow">Local records</p>
+            <h1 id="results-title">Result log</h1>
+            <p class="lede">Actual operation output returned by Orchard. Session tokens and credentials are never shown here.</p>
+          </div>
+        </header>
+        <div id="result-list" class="result-list" aria-live="polite"></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="create-project-dialog" aria-labelledby="create-project-title">
+    <form id="create-project-form" method="dialog">
+      <div class="dialog-header">
+        <div>
+          <p class="eyebrow">New xtool project</p>
+          <h2 id="create-project-title">Create project</h2>
+        </div>
+        <button id="close-create-project" class="icon-button" type="button" aria-label="Close create project dialog">×</button>
+      </div>
+      <p class="dialog-intro">Orchard creates the project beneath the configured workspace and refuses to overwrite existing content.</p>
+      <div class="field">
+        <label for="project-name">Project name</label>
+        <input id="project-name" name="name" required maxlength="80" autocomplete="off" placeholder="Field Notes">
+      </div>
+      <div class="field">
+        <label for="bundle-id">Bundle identifier</label>
+        <input id="bundle-id" name="bundleId" required maxlength="255" autocomplete="off" inputmode="url" placeholder="com.example.fieldnotes">
+      </div>
+      <div class="field">
+        <label for="project-directory">Relative directory</label>
+        <input id="project-directory" name="directory" required maxlength="255" autocomplete="off" placeholder="field-notes">
+        <p class="field-help">Use a path inside this Orchard workspace.</p>
+      </div>
+      <p id="create-status" class="inline-status" aria-live="polite"></p>
+      <div class="dialog-actions">
+        <button id="cancel-create-project" class="secondary-button" type="button">Cancel</button>
+        <button id="submit-create-project" class="primary-button" type="submit">Create project</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>
