@@ -58,3 +58,7 @@ Plans expose the steps and prerequisites before execution. Account writes additi
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 Omarchy/Arch is a primary target. Portable amd64 and arm64 binaries are the foundation for other distributions; compiler libraries, device services and desktop behavior still need distribution-specific verification.
+
+## License
+
+Pomeforge's original source code and documentation are available under the [MIT License](LICENSE). Third-party components retain their own licenses and copyright notices, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Redistributions must retain the applicable license texts and notices, including the source-distribution requirements for the separate unxip executable when it is included.

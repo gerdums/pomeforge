@@ -39,6 +39,7 @@ cp "$repo_root/.dockerignore" "$probe_root/.dockerignore"
 cp "$repo_root/.containerignore" "$probe_root/.containerignore"
 cp "$repo_root/packaging/tests/Containerfile.context" "$probe_root/Containerfile.context"
 cp "$repo_root/go.mod" "$probe_root/go.mod"
+cp "$repo_root/LICENSE" "$probe_root/LICENSE"
 mkdir -p -- "$probe_root/docs/third-party" "$probe_root/internal/.git" \
   "$probe_root/internal/.sandcastle" "$probe_root/internal/.workflow" \
   "$probe_root/internal/.asc" "$probe_root/internal/.pomeforge" "$probe_root/internal/.orchard" \

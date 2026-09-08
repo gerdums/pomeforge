@@ -46,7 +46,7 @@ assert_contains 'COPY --from=pomeforge-unxip-build /out/unxip /usr/local/bin/unx
 assert_contains 'COPY --from=pomeforge-unxip-build /out/unxip-3.3.0.tar.gz /usr/share/pomeforge/sources/unxip-3.3.0.tar.gz' "$containerfile"
 assert_contains 'COPY --from=pomeforge-unxip-build /out/unxip-3.3.0.LICENSE /usr/share/pomeforge/sources/unxip-3.3.0.LICENSE' "$containerfile"
 assert_contains 'COPY THIRD_PARTY_NOTICES.md /usr/share/doc/pomeforge/THIRD_PARTY_NOTICES.md' "$containerfile"
-assert_contains 'COPY docs/third-party/ /usr/share/doc/pomeforge/third-party/' "$containerfile"
+assert_contains 'COPY docs/third-party/ /usr/share/doc/pomeforge/docs/third-party/' "$containerfile"
 assert_contains 'test "$(unxip --version)" = "unxip 3.3"' "$containerfile"
 assert_contains 'ldd /usr/local/bin/unxip' "$containerfile"
 assert_contains 'USER 10001:10001' "$containerfile"

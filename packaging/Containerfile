@@ -55,8 +55,10 @@ COPY --from=pomeforge-assets-build /out/pomeforge-assets /usr/local/bin/pomeforg
 COPY --from=pomeforge-unxip-build /out/unxip /usr/local/bin/unxip
 COPY --from=pomeforge-unxip-build /out/unxip-3.3.0.tar.gz /usr/share/pomeforge/sources/unxip-3.3.0.tar.gz
 COPY --from=pomeforge-unxip-build /out/unxip-3.3.0.LICENSE /usr/share/pomeforge/sources/unxip-3.3.0.LICENSE
+COPY LICENSE /usr/share/doc/pomeforge/LICENSE
 COPY THIRD_PARTY_NOTICES.md /usr/share/doc/pomeforge/THIRD_PARTY_NOTICES.md
-COPY docs/third-party/ /usr/share/doc/pomeforge/third-party/
+COPY toolchains.lock.json /usr/share/doc/pomeforge/toolchains.lock.json
+COPY docs/third-party/ /usr/share/doc/pomeforge/docs/third-party/
 COPY packaging/container-entrypoint /usr/local/bin/pomeforge-container-entrypoint
 
 RUN test "$(unxip --version)" = "unxip 3.3" \

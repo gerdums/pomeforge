@@ -2,6 +2,7 @@ ARG PROBE_IMAGE=docker.io/library/golang:1.24.13-bookworm@sha256:1a6d4452c65dea3
 FROM ${PROBE_IMAGE}
 COPY . /context
 RUN test -f /context/go.mod \
+    && test -s /context/LICENSE \
     && test -f /context/THIRD_PARTY_NOTICES.md \
     && test -f /context/docs/third-party/context-license.txt \
     && test -f /context/internal/context-allowed.go \
