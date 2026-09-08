@@ -29,13 +29,16 @@ Build Orchard's pinned Linux AssetKit bridge from this checkout:
 
 ```sh
 swift build --package-path tools/asset-compiler -c release
+orchard_assets=$(realpath "$PWD/tools/asset-compiler/.build/release/orchard-assets")
 orchard tools register orchard-assets \
-  --path "$PWD/tools/asset-compiler/.build/release/orchard-assets" \
+  --path "$orchard_assets" \
   --assetkit-revision e763558b55fcbb5a443b1d7b2c6f0972d8bd14f7 \
   --execute
 ```
 
 The registration records the exact executable SHA-256 in private user state.
+Use the concrete path: SwiftPM's `.build/release` directory is a symlink,
+and registration rejects symbolic links in executable paths.
 Orchard runs `--help` because the bridge intentionally has no `--version`.
 Source and AssetKit revisions are retained only when the operator supplies
 them; Orchard does not invent provenance from a path or binary.
