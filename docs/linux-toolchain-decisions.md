@@ -6,6 +6,8 @@ The primary workflow uses Linux executables throughout. These decisions come fro
 
 xtool's SDK builder retains the SDK content it needs, but it does not preserve every original Xcode metadata file. Extract the supplied XIP with the separately built, pinned unxip executable first. Capture the relevant metadata and its source hashes before invoking the SDK builder in a fresh destination.
 
+unxip 3.3 requires its output directory to exist. Orchard must create an empty, private extraction directory before launching it; passing a nonexistent child path fails before extraction. Keep the SDK builder's destination separate from that extraction directory.
+
 The actual archive used for the probe distinguishes these values:
 
 | Meaning | Source | Observed value |
@@ -16,6 +18,8 @@ The actual archive used for the probe distinguishes these values:
 | SDK system version/build | SDK `System/Library/CoreServices/SystemVersion.plist` | 26.5.1 / 23F81a |
 
 The SDK version and system product version are different facts. Do not substitute one for the other or invent missing DT metadata. Retaining Xcode archive provenance also does not mean Xcode executed the build. No Apple SDK is redistributed with Orchard.
+
+The real SDK's `SDKSettings.plist` uses Apple's binary plist format. Read and validate that format alongside the JSON and XML records, and retain the original metadata bytes with their hashes. The installed SDK also contains thousands of legitimate framework symlinks. Resolve the selected device SDK from named configuration records, enforce containment, and preserve internal links; rejecting every symlink or scanning the entire SDK with a small generic entry limit prevents valid imports.
 
 ## Install as the current Linux user
 
