@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "verifiedAt": "2026-09-08",
+  "tools": [
+    {
+      "id": "xtool",
+      "version": "1.19.0",
+      "source": "https://github.com/xtool-org/xtool",
+      "release": "https://github.com/xtool-org/xtool/releases/tag/1.19.0",
+      "assets": [
+        {
+          "os": "linux",
+          "arch": "arm64",
+          "url": "https://github.com/xtool-org/xtool/releases/download/1.19.0/xtool-aarch64.AppImage",
+          "sha256": "e4bd7f5f822b1ee69a9473ff8e71d7740ddce0a3f0245941d12a6d0db3b76e0c",
+          "size": 51968520,
+          "format": "appimage"
+        },
+        {
+          "os": "linux",
+          "arch": "amd64",
+          "url": "https://github.com/xtool-org/xtool/releases/download/1.19.0/xtool-x86_64.AppImage",
+          "sha256": "cb1baa71f792d15548c4e6f87700a66f91885f1dfd4e9c19c0ea54155589c9d4",
+          "size": 53766648,
+          "format": "appimage"
+        }
+      ]
+    },
+    {
+      "id": "asc",
+      "version": "5.0.0",
+      "source": "https://github.com/rorkai/App-Store-Connect-CLI",
+      "release": "https://github.com/rorkai/App-Store-Connect-CLI/releases/tag/5.0.0",
+      "assets": [
+        {
+          "os": "linux",
+          "arch": "amd64",
+          "url": "https://github.com/rorkai/App-Store-Connect-CLI/releases/download/5.0.0/asc_5.0.0_linux_amd64",
+          "sha256": "76dc06fab91b0f6db73f42bb977fa1f61817b5ee5cb0958a38408f1aceeb3415",
+          "size": 57184418,
+          "format": "binary"
+        },
+        {
+          "os": "linux",
+          "arch": "arm64",
+          "url": "https://github.com/rorkai/App-Store-Connect-CLI/releases/download/5.0.0/asc_5.0.0_linux_arm64",
+          "sha256": "f457c466e869bcf1824795f493d4b9169644d7784f0dd124dedd08461c3d5099",
+          "size": 51970210,
+          "format": "binary"
+        }
+      ]
+    },
+    {
+      "id": "zsign",
+      "version": "v1.1.2",
+      "source": "https://github.com/zhlynn/zsign",
+      "release": "https://github.com/zhlynn/zsign/releases/tag/v1.1.2",
+      "assets": [
+        {
+          "os": "linux",
+          "arch": "arm64",
+          "url": "https://github.com/zhlynn/zsign/releases/download/v1.1.2/zsign-linux-aarch64.tar.gz",
+          "sha256": "801527987276bcfb30c61c0106882845d1840da25ef0cd9118ef7ef6927ae80c",
+          "size": 255480,
+          "format": "tar.gz"
+        },
+        {
+          "os": "linux",
+          "arch": "amd64",
+          "url": "https://github.com/zhlynn/zsign/releases/download/v1.1.2/zsign-linux-x86_64.tar.gz",
+          "sha256": "d55e6a8650949a260892a9687ac1dfe4a9c79c2e3ecfe00a0eeb09b7b694282e",
+          "size": 248818,
+          "format": "tar.gz"
+        }
+      ]
+    }
+  ]
+}
