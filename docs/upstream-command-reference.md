@@ -315,3 +315,85 @@ options:
 -v, --version		Shows version.
 -h, --help		Shows help (this message).
 ```
+
+## asc review submit --help
+
+Exit status: 0
+
+```text
+DESCRIPTION
+  Attach a build and submit an already-prepared App Store version for review.
+
+USAGE
+  asc review submit [flags]
+
+This is the easier modern wrapper around:
+  - asc versions attach-build
+  - asc review submissions-create
+  - asc review items-add
+  - asc review submissions-submit
+
+Examples:
+  asc review submit --app "123456789" --version "1.2.3" --build-id "BUILD_ID" --confirm
+  asc review submit --app "123456789" --version-id "VERSION_ID" --build-id "BUILD_ID" --dry-run
+
+FLAGS
+  --app          App Store Connect app ID (or ASC_APP_ID)
+  --build-id     Build ID to attach
+  --confirm      Confirm submission (required unless --dry-run) (default: false)
+  --dry-run      Preview the review submission flow without mutating (default: false)
+  --output       Output format: json, table, markdown (default: json)
+  --platform     Platform: IOS, MAC_OS, TV_OS, VISION_OS (default: IOS)
+  --pretty       Pretty-print JSON output (default: false)
+  --version      App Store version string
+  --version-id   App Store version ID
+```
+
+## asc profiles inspect --help
+
+Exit status: 0
+
+```text
+DESCRIPTION
+  Inspect a local provisioning profile.
+
+USAGE
+  asc profiles inspect --path "./profile.mobileprovision" [flags]
+
+This command decodes the embedded plist from a .mobileprovision file and prints
+the profile identifiers, dates, certificate fingerprints, devices, and
+entitlements.
+
+Examples:
+  asc profiles inspect --path "./profile.mobileprovision"
+  asc profiles inspect --path "./profile.mobileprovision" --output json
+  asc profiles inspect --path "./profile.mobileprovision" --entitlements
+
+FLAGS
+  --entitlements Include entitlement key/value rows in table or markdown output (default: false)
+  --output       Output format: json, table, markdown (default: json)
+  --path         Path to a .mobileprovision file to inspect
+  --pretty       Pretty-print JSON output (default: false)
+```
+
+## xtool sdk build --help
+
+Exit status: 0
+
+```text
+OVERVIEW: Build the Darwin SDK from Xcode.xip
+
+USAGE: xtool sdk build <path> <output-dir> [--arch <arch>]
+
+ARGUMENTS:
+  <path>                  Path to Xcode.xip or Xcode.app
+  <output-dir>            Output directory
+
+OPTIONS:
+  --arch <arch>           The architecture of the Linux host the SDK is being
+                          built for. (default: auto)
+        Defaults to 'auto', which attempts to match the current host
+        architecture.
+  --version               Show the version.
+  -h, --help              Show help information.
+```
