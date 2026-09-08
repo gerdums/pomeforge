@@ -298,8 +298,12 @@ podman run --rm --userns=keep-id --user "$(id -u):$(id -g)" \
 ```
 
 The host user must be permitted to open the socket. Device trust, Developer
-Mode, and host udev permissions remain host/device setup. Pairing records stay
-in the private state mount; do not share a host pairing directory or commit it.
+Mode, and host udev permissions remain host/device setup. When using the host
+socket, the host daemon manages pairing records, normally in
+`/var/lib/lockdown` on Linux, as described in the [usbmuxd usage
+guide](https://github.com/libimobiledevice/usbmuxd#usage). Orchard's private
+state mount does not relocate those records. Do not mount or commit the host
+pairing directory.
 
 If a tool cannot use the host socket, direct passthrough is a narrower fallback.
 Identify the current device node, grant only its host group, and pass only that
