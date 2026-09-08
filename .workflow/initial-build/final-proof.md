@@ -10,6 +10,7 @@ Acceptance criteria:
 - The amd64 CLI executes version, project creation and prerequisite plans in pinned Arch Linux under CPU emulation. Native Omarchy desktop support is a separate unproved environment.
 - Node tests, actual GIO interpretation of the installed desktop entry, and container private-state contracts pass as a non-root Linux user.
 - A fresh non-root graphical session installs the actual pinned ASC binary before a project exists, verifies its hash/version, and visibly reports the setup outcome.
+- The graphical session configures an explicitly synthetic signing identity, keeps private fixture paths out of public plans and results, selects that identity for export, and reports missing bundle/tool prerequisites without enabling execution. No Apple identity is used.
 - The live browser creates a project, displays truthful missing build prerequisites, invalidates stale plans, refuses unauthenticated and foreign-Origin API access, and fits a narrow viewport without page errors.
 - Retained screenshots, video, test results and source/binary hashes identify the exact tested revision.
 
