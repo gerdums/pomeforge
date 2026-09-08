@@ -10,8 +10,8 @@ Orchard targets Linux distributions through portable amd64 and arm64 binaries. D
 | ASC 5.0.0 | Debian 12, Linux arm64 container | Published binary hash verified; version and command help execute without network or Apple credentials |
 | zsign 1.1.2 | Debian 12, Linux arm64 container | Published archive hash verified; extracted signer version/help execute |
 | AssetKit pinned source | Swift 6.3.3, Linux arm64 container | Upstream test runner reports 38 tests; external rsvg-convert test skipped, Apple assetutil gate unavailable on Linux |
-| Orchard app and CLI | Pending integrated build | Recorded in `verification.md` when checked |
-| iOS SDK and app cross-build | Pending user-provided SDK and license review | Not established by tool version checks |
+| Orchard app and CLI | Linux arm64; Arch Linux amd64 under CPU emulation | Baseline binaries, tests and live graphical flow passed; final composed checks tracked in `verification.md` |
+| iOS SDK and app cross-build | Swift 6.3.3 Linux arm64; operator-supplied Xcode 26.6 / iPhoneOS 26.5 SDK | Actual SDK extraction/install and SwiftUI cross-build passed; final release integration remains under verification |
 | Physical iPhone/iPad | Pending Linux device access | Pairing, build/install/launch and media evidence required |
 | TestFlight and App Store | Pending approved account/app/signing setup | Exact IPA hash and successful Apple processing required |
 
