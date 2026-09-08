@@ -60,7 +60,7 @@ install -m 0644 "$installer_dir/pomeforge.svg" "$icon_path"
 
 # Desktop Exec values have a general string escape layer followed by command
 # quoting. A literal backslash therefore needs four raw backslashes. Dollar and
-# backtick quoting escapes need two; a quote itself needs one.
+# backtick quoting escapes and a quote each need two.
 escaped_launcher=$(printf '%s' "$launcher_path" | LC_ALL=C awk '
   BEGIN { ORS = "" }
   {
@@ -69,7 +69,7 @@ escaped_launcher=$(printf '%s' "$launcher_path" | LC_ALL=C awk '
       if (character == "\\") {
         printf "%c%c%c%c", 92, 92, 92, 92
       } else if (character == "\"") {
-        printf "%c%c", 92, 34
+        printf "%c%c%c", 92, 92, 34
       } else if (character == "$" || character == "`") {
         printf "%c%c%s", 92, 92, character
       } else {

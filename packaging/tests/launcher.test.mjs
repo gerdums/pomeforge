@@ -49,6 +49,16 @@ test("GIO interprets the installed desktop entry with special path characters", 
   const desktopPath = path.join(dataHome, "applications", "pomeforge.desktop");
   const desktop = await readFile(desktopPath, "utf8");
   assert.match(desktop, /^Exec=".+"$/m);
+  const execLine = desktop.match(/^Exec=.+$/m)?.[0];
+  assert.ok(execLine, "missing desktop Exec line");
+  for (const [character, encoding] of [
+    ["double quote", String.raw`\\"`],
+    ["backslash", String.raw`\\\\`],
+    ["dollar", String.raw`\\$`],
+    ["backtick", "\\\\`"]
+  ]) {
+    assert.ok(execLine.includes(encoding), `Exec line does not preserve the ${character} escape: ${execLine}`);
+  }
 
   const workspace = path.join(root, "Projects 100% & | ' \" \\ $ ` ready");
   const launchResult = spawnSync(path.join(dataHome, "pomeforge", "bin", "pomeforge-workspace"), [], {
