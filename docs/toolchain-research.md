@@ -158,7 +158,7 @@ if let icons = result.appIconBundle {
 }
 ```
 
-Build the host executable with `swift build --package-path tools/orchard-assets -c release`; its planned interface can be `.build/release/orchard-assets CATALOG.xcassets STAGED.app`. That interface is Orchard's adapter contract, not an upstream AssetKit command. Compilation must finish before signing, because editing Info.plist or resources invalidates signatures.
+Build the Linux host executable with `swift build --package-path tools/asset-compiler -c release`. Orchard's implemented bridge accepts `orchard-assets compile --catalog CATALOG.xcassets --app STAGED.app --minimum-ios 17.0 --json`. That interface is Orchard's adapter contract, not an upstream AssetKit command. Compilation must finish before signing, because editing Info.plist or resources invalidates signatures.
 
 AssetKit documents deterministic Linux/macOS bytes and a macOS CI check using Apple's `assetutil`. Those checks establish format parsing for fixtures, not acceptance of every app by App Store Connect. Retain an app-icon device screenshot and a successful build-processing receipt for the actual release candidate. [Compiler API](https://github.com/xtool-org/AssetKit/blob/e763558b55fcbb5a443b1d7b2c6f0972d8bd14f7/Sources/AssetKit/XCAssetCompiler.swift).
 
