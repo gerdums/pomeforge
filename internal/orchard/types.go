@@ -106,8 +106,13 @@ type State struct {
 type CodedError struct {
 	Code    string
 	Message string
+	Result  *OperationResult
 }
 
 func (e *CodedError) Error() string { return e.Message }
 
 func Errorf(code, message string) error { return &CodedError{Code: code, Message: message} }
+
+func ErrorWithResult(code, message string, result OperationResult) error {
+	return &CodedError{Code: code, Message: message, Result: &result}
+}

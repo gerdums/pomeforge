@@ -280,6 +280,34 @@ func TestAPIReturnsRedactedFailedOperationResult(t *testing.T) {
 	}
 }
 
+func TestAPIHistoryFailureCarriesCompletedOperationResult(t *testing.T) {
+	server, api, workspace := testAPI(t)
+	if _, err := orchard.CreateProject(workspace, "Demo", "Demo", "com.example.Demo"); err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(workspace, "history-fixture")
+	script := "#!/bin/sh\nrm .orchard/history.jsonl && mkdir .orchard/history.jsonl\nprintf 'completed API output token=syntheticreceiptsecret'\n"
+	if err := os.WriteFile(executable, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tools := api.Service.Tools.(webTools)
+	tools["xtool"] = orchard.ToolStatus{ID: "xtool", Name: "xtool", Status: "available", Path: executable, Detail: "fixture"}
+	response := request(t, server, http.MethodPost, "/api/plan", `{"action":"devices","project":"Demo"}`, "test-token", "")
+	var planned struct {
+		Data orchard.Plan `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&planned); err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	response = request(t, server, http.MethodPost, "/api/run", `{"planId":"`+planned.Data.ID+`","confirm":false}`, "test-token", "")
+	body, _ := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusInternalServerError || !bytes.Contains(body, []byte(`"code":"history_failed"`)) || !bytes.Contains(body, []byte(`"result":{"id"`)) || !bytes.Contains(body, []byte("completed API output")) || bytes.Contains(body, []byte("syntheticreceiptsecret")) || !bytes.Contains(body, []byte("[redacted]")) {
+		t.Fatalf("history failure response status=%d body=%s", response.StatusCode, body)
+	}
+}
+
 func TestServeAppPrintsActualTokenURLAndRejectsForeignBind(t *testing.T) {
 	service, err := orchard.NewService(t.TempDir(), webTools{})
 	if err != nil {

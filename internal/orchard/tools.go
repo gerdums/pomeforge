@@ -110,7 +110,7 @@ func (r SystemToolResolver) probeDefinition(ctx context.Context, definition tool
 		status.Status = "unverified"
 		status.Detail = "Orchard has verified only xtool 1.19.0 command contracts; this version is not verified"
 	}
-	if definition.id == "asc" && !regexp.MustCompile(`(?i)(?:asc[^0-9]*)?5\.[0-9]+`).MatchString(version) {
+	if definition.id == "asc" && !regexp.MustCompile(`(?i)^asc\s+version\s+5\.[0-9]+(?:\.[0-9]+)?(?:\s|$)`).MatchString(version) {
 		status.Status = "incompatible"
 		status.Detail = "Orchard has verified ASC 5.x command contracts; found a different version"
 	}
@@ -142,7 +142,10 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 	if b.limit <= 0 {
 		b.limit = 64 * 1024
 	}
-	remaining := b.limit - b.buffer.Len()
+	// Keep bounded lookahead beyond the public cap so credentials crossing the
+	// cap can be recognized before the retained value is truncated.
+	captureLimit := b.limit + maxRedactionLookahead
+	remaining := captureLimit - b.buffer.Len()
 	if remaining <= 0 {
 		b.truncated = true
 		return original, nil
@@ -157,8 +160,17 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 }
 
 func (b *cappedBuffer) String() string {
-	value := b.buffer.String()
-	if b.truncated {
+	value := redactOutput(b.buffer.String())
+	truncated := b.truncated
+	if len(value) > b.limit {
+		bounded := value[:b.limit]
+		if marker := strings.LastIndex(bounded, "["); marker >= 0 && strings.HasPrefix("[redacted]", bounded[marker:]) && strings.HasPrefix(value[marker:], "[redacted]") {
+			bounded = bounded[:marker] + "[redacted]"
+		}
+		value = bounded
+		truncated = true
+	}
+	if truncated {
 		value += "\n[output truncated by Orchard]\n"
 	}
 	return value

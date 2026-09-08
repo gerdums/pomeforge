@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,10 +22,11 @@ import (
 )
 
 const (
-	EnvironmentProbe   = "probe"
-	EnvironmentASC     = "asc"
-	EnvironmentBrowser = "browser"
-	maxHistoryBytes    = 8 << 20
+	EnvironmentProbe      = "probe"
+	EnvironmentASC        = "asc"
+	EnvironmentBrowser    = "browser"
+	maxHistoryBytes       = 8 << 20
+	maxRedactionLookahead = 1 << 20
 )
 
 type Executor struct {
@@ -167,10 +169,10 @@ func (e *Executor) Execute(ctx context.Context, plan Plan, project string, confi
 		}
 	}
 	result.FinishedAt = time.Now().UTC()
-	result.Output = redactOutput(output.String())
+	result.Output = output.String()
 	if err := appendHistory(project, result); err != nil {
-		result.Output = redactOutput(result.Output + "\nhistory warning: operation completed but history could not be stored: " + err.Error() + "\n")
-		return result, nil
+		message := "operation completed, but its private history receipt could not be stored: " + err.Error()
+		return result, ErrorWithResult("history_failed", message, result)
 	}
 	return result, nil
 }
@@ -187,12 +189,12 @@ func safeProcessError(err error) string {
 }
 
 var secretPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]+-----.*?-----END [A-Z0-9 ]+-----`),
+	regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]+-----.*?(?:-----END [A-Z0-9 ]+-----|\z)`),
 	regexp.MustCompile(`(?i)(authorization\s*[:=]\s*bearer\s+)[^\s]+`),
 	regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+`),
 	regexp.MustCompile(`(?i)(private[-_ ]?key\s*[:=]\s*)[^\s]+`),
 	regexp.MustCompile(`(?i)(token\s*[:=]\s*)[A-Za-z0-9._~+/=-]{8,}`),
-	regexp.MustCompile(`[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`),
+	regexp.MustCompile(`[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*`),
 	regexp.MustCompile(`(?i)(https?://[^\s?]+)\?[^\s]+`),
 }
 
@@ -204,6 +206,16 @@ func redactOutput(value string) string {
 	sort.Slice(known, func(i, j int) bool { return len(known[i]) > len(known[j]) })
 	for _, secret := range known {
 		value = strings.ReplaceAll(value, secret, "[redacted]")
+		maximum := len(secret) - 1
+		if maximum > len(value) {
+			maximum = len(value)
+		}
+		for length := maximum; length >= 4; length-- {
+			if strings.HasSuffix(value, secret[:length]) {
+				value = value[:len(value)-length] + "[redacted]"
+				break
+			}
+		}
 	}
 	return value
 }
@@ -291,11 +303,16 @@ func LoadHistory(project string, limit int) ([]OperationResult, error) {
 	if info.Size() > maxHistoryBytes {
 		return nil, fmt.Errorf("history.jsonl exceeds the %d-byte read limit", maxHistoryBytes)
 	}
+	return scanHistory(file, limit)
+}
+
+func scanHistory(reader io.Reader, limit int) ([]OperationResult, error) {
 	if limit <= 0 {
 		limit = 100
 	}
+	bounded := &io.LimitedReader{R: reader, N: maxHistoryBytes + 1}
 	results := make([]OperationResult, 0)
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(bounded)
 	scanner.Buffer(make([]byte, 4096), 256*1024)
 	for scanner.Scan() {
 		var result OperationResult
@@ -308,6 +325,9 @@ func LoadHistory(project string, limit int) ([]OperationResult, error) {
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
+	}
+	if bounded.N == 0 {
+		return nil, fmt.Errorf("history.jsonl exceeds the %d-byte read limit", maxHistoryBytes)
 	}
 	for left, right := 0, len(results)-1; left < right; left, right = left+1, right-1 {
 		results[left], results[right] = results[right], results[left]

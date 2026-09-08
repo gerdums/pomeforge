@@ -26,6 +26,8 @@ func TestCapturedToolVersionClassification(t *testing.T) {
 		{"swift-old", "swift", "Swift version 6.2.3 (swift-6.2.3-RELEASE)", "incompatible", "requires Swift 6.3"},
 		{"asc-5", "asc", "asc version 5.0.0 (commit synthetic)", "available", "verified by executing"},
 		{"asc-old", "asc", "asc version 4.2.0", "incompatible", "verified ASC 5.x"},
+		{"asc-wrong-prefix", "asc", "tool 5.0.0", "incompatible", "verified ASC 5.x"},
+		{"asc-future-major", "asc", "asc version 15.0.0", "incompatible", "verified ASC 5.x"},
 		{"xtool-pinned", "xtool", "xtool 1.19.0", "available", "verified by executing"},
 		{"xtool-old", "xtool", "xtool 1.18.0", "unverified", "only xtool 1.19.0"},
 		{"xtool-unknown", "xtool", "unexpected version text", "unverified", "only xtool 1.19.0"},
@@ -61,5 +63,14 @@ func TestToolProbeKillsPipeHoldingDescendantAndRedactsDiagnostics(t *testing.T) 
 	status = (SystemToolResolver{Timeout: time.Second}).probeDefinition(context.Background(), definition)
 	if strings.Contains(status.Version, canary) || !strings.Contains(status.Version, "[redacted]") {
 		t.Fatalf("probe diagnostic was not redacted: %#v", status)
+	}
+}
+
+func TestToolProbeRedactsPEMBeforeTruncation(t *testing.T) {
+	path := probeScript(t, "printf '%b' '-----BEGIN PRIVATE KEY-----\\n"+strings.Repeat("synthetic-private-material", 400)+"\\n-----END PRIVATE KEY-----'")
+	definition := toolDefinition{id: "zsign", name: "zsign", executable: path, versionArgs: []string{"--version"}, installURL: "https://example.invalid"}
+	status := (SystemToolResolver{Timeout: time.Second}).probeDefinition(context.Background(), definition)
+	if strings.Contains(status.Version, "BEGIN PRIVATE KEY") || strings.Contains(status.Version, "synthetic-private-material") || !strings.Contains(status.Version, "[redacted]") {
+		t.Fatalf("truncated probe output was not redacted: %#v", status)
 	}
 }

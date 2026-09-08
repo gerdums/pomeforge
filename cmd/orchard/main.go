@@ -37,8 +37,9 @@ type responseEnvelope struct {
 }
 
 type responseError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code    string                   `json:"code"`
+	Message string                   `json:"message"`
+	Result  *orchard.OperationResult `json:"result,omitempty"`
 }
 
 type schemaParameter struct {
@@ -318,7 +319,7 @@ func (c *cli) operation(args []string, execute bool) int {
 	if c.json {
 		_ = json.NewEncoder(c.stdout).Encode(responseEnvelope{OK: true, Data: result})
 	} else {
-		fmt.Fprintf(c.stdout, "%s: %s (exit %d)\n%s", result.Action, result.Status, result.ExitCode, result.Output)
+		writeHumanResult(c.stdout, result)
 	}
 	return exitCode
 }
@@ -393,13 +394,18 @@ func (c *cli) success(data any, human string) int {
 
 func (c *cli) fail(err error, code int) int {
 	errCode, message := "error", err.Error()
+	var result *orchard.OperationResult
 	var coded *orchard.CodedError
 	if errors.As(err, &coded) {
 		errCode, message = coded.Code, coded.Message
+		result = coded.Result
 	}
 	if c.json {
-		_ = json.NewEncoder(c.stdout).Encode(responseEnvelope{OK: false, Error: &responseError{Code: errCode, Message: message}})
+		_ = json.NewEncoder(c.stdout).Encode(responseEnvelope{OK: false, Error: &responseError{Code: errCode, Message: message, Result: result}})
 	} else {
+		if result != nil {
+			writeHumanResult(c.stdout, *result)
+		}
 		fmt.Fprintln(c.stderr, "Error:", message)
 	}
 	return code
@@ -415,9 +421,15 @@ func exitFor(err error) int {
 		return 3
 	case "stale_plan", "operation_in_progress", "already_exists":
 		return 4
+	case "history_failed":
+		return 1
 	default:
 		return 2
 	}
+}
+
+func writeHumanResult(output io.Writer, result orchard.OperationResult) {
+	fmt.Fprintf(output, "%s: %s (exit %d)\n%s", result.Action, result.Status, result.ExitCode, result.Output)
 }
 
 func humanTools(tools []orchard.ToolStatus) string {

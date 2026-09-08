@@ -33,6 +33,17 @@ func TestProcessHelper(t *testing.T) {
 		fmt.Fprint(os.Stdout, strings.Repeat("x", 4096))
 	case "secret":
 		fmt.Fprint(os.Stdout, "Authorization: Bearer abc.def.secret token=supersecrettoken")
+	case "long-secret":
+		fmt.Fprint(os.Stdout, strings.Repeat("safe", 40)+"-----BEGIN PRIVATE KEY-----\n"+strings.Repeat("synthetic-private-material", 200)+"\n-----END PRIVATE KEY-----")
+	case "break-history":
+		history := filepath.Join(os.Args[separator+2], ".orchard", "history.jsonl")
+		if err := os.Remove(history); err != nil {
+			os.Exit(10)
+		}
+		if err := os.Mkdir(history, 0o700); err != nil {
+			os.Exit(11)
+		}
+		fmt.Fprint(os.Stdout, "operation output survived")
 	case "sleep":
 		time.Sleep(250 * time.Millisecond)
 		fmt.Fprint(os.Stdout, "done")
@@ -206,6 +217,61 @@ func TestOutputRedactsPEMJWTEnvironmentValueAndPresignedURL(t *testing.T) {
 	}
 }
 
+func TestExecutorRedactsBeforeOutputTruncation(t *testing.T) {
+	project := t.TempDir()
+	result, err := (&Executor{OutputCap: 256, Timeout: time.Second}).Execute(context.Background(), helperPlan(project, "long-secret"), project, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"BEGIN PRIVATE KEY", "synthetic-private-material"} {
+		if strings.Contains(result.Output, forbidden) {
+			t.Fatalf("truncated operation output retained %q: %q", forbidden, result.Output)
+		}
+	}
+	if !strings.Contains(result.Output, "[redacted]") {
+		t.Fatalf("missing redaction marker: %q", result.Output)
+	}
+
+	credential := strings.Repeat("credential", 40)
+	t.Setenv("ASC_LONG_CANARY", credential)
+	var output cappedBuffer
+	output.limit = 64
+	_, _ = output.Write([]byte(strings.Repeat("x", 60) + credential + " trailing"))
+	retained := output.String()
+	if strings.Contains(retained, credential[:8]) || !strings.Contains(retained, "[redacted]") {
+		t.Fatalf("credential crossing output cap was retained: %q", retained)
+	}
+	for name, value := range map[string]string{
+		"jwt":           strings.Repeat("y", 20) + "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzeW50aGV0aWMifQ.c3ludGhldGljLXNpZ25hdHVyZQ",
+		"presigned URL": strings.Repeat("z", 20) + "https://upload.example.invalid/object?X-Amz-Signature=fakecapability",
+	} {
+		var bounded cappedBuffer
+		bounded.limit = 64
+		_, _ = bounded.Write([]byte(value))
+		retained = bounded.String()
+		if strings.Contains(retained, "eyJhbGci") || strings.Contains(retained, "fakecapability") || !strings.Contains(retained, "[redacted]") {
+			t.Fatalf("%s crossing output cap was retained: %q", name, retained)
+		}
+	}
+}
+
+func TestExecutorReturnsResultWithPostOperationHistoryFailure(t *testing.T) {
+	project := t.TempDir()
+	plan := helperPlan(project, "break-history")
+	plan.Steps[0].Args = append(plan.Steps[0].Args, project)
+	result, err := (&Executor{Timeout: 5 * time.Second}).Execute(context.Background(), plan, project, false)
+	if err == nil {
+		t.Fatal("expected history persistence failure")
+	}
+	var coded *CodedError
+	if !errors.As(err, &coded) || coded.Code != "history_failed" || coded.Result == nil {
+		t.Fatalf("history error did not carry result: %#v", err)
+	}
+	if result.ID == "" || coded.Result.ID != result.ID || coded.Result.Status != "succeeded" || !strings.Contains(coded.Result.Output, "operation output survived") {
+		t.Fatalf("completed result was not preserved: result=%#v error=%#v", result, coded)
+	}
+}
+
 func TestHistoryRejectsSymlink(t *testing.T) {
 	project := t.TempDir()
 	if err := os.Mkdir(filepath.Join(project, ".orchard"), 0o700); err != nil {
@@ -257,5 +323,13 @@ func TestHistoryRejectsSpecialAndOversizedFiles(t *testing.T) {
 	_ = file.Close()
 	if _, err := LoadHistory(project, 10); err == nil || !strings.Contains(err.Error(), "read limit") {
 		t.Fatalf("oversized history was not rejected: %v", err)
+	}
+}
+
+func TestHistoryStreamingLimitRejectsGrowthBeyondInitialSize(t *testing.T) {
+	line := strings.Repeat("x", 64*1024) + "\n"
+	reader := strings.NewReader(strings.Repeat(line, maxHistoryBytes/len(line)+2))
+	if _, err := scanHistory(reader, 10); err == nil || !strings.Contains(err.Error(), "read limit") {
+		t.Fatalf("streaming history limit was not enforced: %v", err)
 	}
 }

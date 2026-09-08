@@ -327,6 +327,66 @@ func TestPlanIdentityIncludesIPAContent(t *testing.T) {
 	}
 }
 
+func TestProjectLocalSelectedIPALargerThanSourceLimitUsesIPALimit(t *testing.T) {
+	workspace, project := testProject(t, AppStoreIDs{AppID: "1001"})
+	if err := os.Mkdir(filepath.Join(project, "dist"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ipa := filepath.Join(project, "dist", "Demo.ipa")
+	file, err := os.Create(ipa)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Truncate(maxFingerprintFileBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := (Planner{Workspace: workspace, Tools: availableTools()}).Plan(context.Background(), PlanInput{Action: "upload", Project: project, IPA: ipa})
+	if err != nil {
+		t.Fatalf("selected project-local IPA was constrained as source: %v", err)
+	}
+	if !plan.Executable {
+		t.Fatalf("selected IPA plan was unexpectedly blocked: %#v", plan.Blockers)
+	}
+}
+
+func TestNoFollowTraversalKeepsOpenedDirectoryAfterPathReplacement(t *testing.T) {
+	root := t.TempDir()
+	inside := filepath.Join(root, "inside")
+	if err := os.Mkdir(inside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a-trigger", "b-source"} {
+		if err := os.WriteFile(filepath.Join(inside, name), []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "outside-secret"), []byte("must-not-visit"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	visited := []string{}
+	err := walkRegularFilesWithin(context.Background(), root, map[string]bool{}, func(relative string, _ *os.File) error {
+		visited = append(visited, filepath.ToSlash(relative))
+		if relative == filepath.Join("inside", "a-trigger") {
+			if err := os.Rename(inside, filepath.Join(root, "opened-directory")); err != nil {
+				return err
+			}
+			return os.Symlink(outside, inside)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(visited, " ")
+	if !strings.Contains(joined, "inside/b-source") || strings.Contains(joined, "outside-secret") {
+		t.Fatalf("descriptor traversal escaped replaced directory: %v", visited)
+	}
+}
+
 func TestPlanRejectsProjectSymlink(t *testing.T) {
 	workspace, project := testProject(t, AppStoreIDs{})
 	if err := os.Symlink(filepath.Join(project, "Package.swift"), filepath.Join(project, "linked.swift")); err != nil {

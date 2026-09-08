@@ -38,7 +38,9 @@ data contains the same `url` instead of the human line.
 
 `--json` is accepted before or after every command. Successes use
 `{"ok":true,"data":...}` and errors use
-`{"ok":false,"error":{"code":"...","message":"..."}}`.
+`{"ok":false,"error":{"code":"...","message":"..."}}`. If an operation
+completed but its private receipt could not be stored, the error additionally
+contains the bounded, redacted operation as `error.result`.
 
 ```sh
 orchard --json doctor
@@ -164,12 +166,13 @@ filter is not an operating-system sandbox.
 
 Managed processes use Linux process groups, deadlines, and bounded pipe waits so
 descendants cannot keep an operation or version probe alive indefinitely.
-Output is capped and redacted for PEM blocks, bearer/JWT tokens, known credential
-environment values, and presigned URL queries before CLI/API exposure or private
-history storage. `orchard.json` is limited to 1 MiB, and history reads reject
-nonregular files and files above 8 MiB. If an operation runs and a later history
-append fails because the file changed concurrently, the result remains available
-with a redacted `history warning` in its output.
+Output is redacted for PEM blocks, bearer/JWT tokens, known credential environment
+values, and presigned URL queries before the bounded value reaches CLI/API output
+or private history storage. `orchard.json` is limited to 1 MiB, and history reads
+enforce an 8 MiB streaming limit while rejecting nonregular files. If an operation
+runs and a later history append fails because the file changed concurrently, JSON
+returns a `history_failed` error with the bounded, redacted operation in
+`error.result`; human output prints that result before the receipt-storage error.
 
 ## Verification boundary
 

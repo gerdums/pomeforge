@@ -156,6 +156,42 @@ func TestCLIReturnsChildExitCode(t *testing.T) {
 	}
 }
 
+func TestCLIHistoryFailureCarriesResultInJSONAndHumanOutput(t *testing.T) {
+	previous := defaultTools
+	t.Cleanup(func() { defaultTools = previous })
+	for _, jsonMode := range []bool{true, false} {
+		workspace := t.TempDir()
+		project, err := orchard.CreateProject(workspace, "Demo", "Demo", "com.example.Demo")
+		if err != nil {
+			t.Fatal(err)
+		}
+		executable := filepath.Join(workspace, "history-fixture")
+		script := "#!/bin/sh\nif [ -f .orchard/history.jsonl ]; then rm .orchard/history.jsonl && mkdir .orchard/history.jsonl; fi\nprintf 'completed output token=synthetichistorysecret'\n"
+		if err := os.WriteFile(executable, []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		defaultTools = cliTools{
+			"swift": {ID: "swift", Name: "swift", Status: "available", Path: executable, Detail: "fixture"},
+			"xtool": {ID: "xtool", Name: "xtool", Status: "available", Path: executable, Detail: "fixture"},
+		}
+		args := []string{"run", "build", "--project", project.Path, "--execute"}
+		if jsonMode {
+			args = append(args, "--json")
+		}
+		code, stdout, stderr := runCLI(t, args...)
+		if code != 1 || !strings.Contains(stdout, "completed output") || strings.Contains(stdout, "synthetichistorysecret") || !strings.Contains(stdout, "[redacted]") {
+			t.Fatalf("json=%t code=%d stdout=%q stderr=%q", jsonMode, code, stdout, stderr)
+		}
+		if jsonMode {
+			if stderr != "" || !strings.Contains(stdout, `"code":"history_failed"`) || !strings.Contains(stdout, `"result":{"id"`) {
+				t.Fatalf("JSON history failure lost structured result: stdout=%q stderr=%q", stdout, stderr)
+			}
+		} else if !strings.Contains(stdout, "build: succeeded") || !strings.Contains(stderr, "history receipt") {
+			t.Fatalf("human history failure lost result or error: stdout=%q stderr=%q", stdout, stderr)
+		}
+	}
+}
+
 func TestCreationContextRejectsSymlinkDestination(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()

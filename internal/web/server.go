@@ -45,8 +45,9 @@ type envelope struct {
 }
 
 type errorBody struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code    string                   `json:"code"`
+	Message string                   `json:"message"`
+	Result  *orchard.OperationResult `json:"result,omitempty"`
 }
 
 func (a *API) Handler() http.Handler {
@@ -241,13 +242,15 @@ func writeData(w http.ResponseWriter, status int, data any) {
 func writeError(w http.ResponseWriter, status int, err error) {
 	code := "internal_error"
 	message := "internal error"
+	var result *orchard.OperationResult
 	var coded *orchard.CodedError
 	if errors.As(err, &coded) {
 		code, message = coded.Code, coded.Message
+		result = coded.Result
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(envelope{OK: false, Error: &errorBody{Code: code, Message: message}})
+	_ = json.NewEncoder(w).Encode(envelope{OK: false, Error: &errorBody{Code: code, Message: message, Result: result}})
 }
 
 func statusFor(err error) int {
@@ -264,6 +267,8 @@ func statusFor(err error) int {
 		return http.StatusUnprocessableEntity
 	case "plan_not_found", "manifest_not_found", "path_not_found":
 		return http.StatusNotFound
+	case "history_failed":
+		return http.StatusInternalServerError
 	default:
 		return http.StatusBadRequest
 	}

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -231,41 +230,18 @@ func (p Planner) fingerprint(ctx context.Context, project string, input PlanInpu
 	_, _ = h.Write(encodedInput)
 	_, _ = io.WriteString(h, "\x00")
 	var projectBytes int64
-	err := filepath.WalkDir(project, func(path string, entry fs.DirEntry, walkErr error) error {
-		if err := ctx.Err(); err != nil {
-			return err
+	selectedIPA := ""
+	if input.IPA != "" {
+		if relative, relErr := filepath.Rel(project, input.IPA); relErr == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			selectedIPA = filepath.Clean(relative)
 		}
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, _ := filepath.Rel(project, path)
-		if entry.Type()&os.ModeSymlink != 0 {
-			return Errorf("symlink_not_allowed", "project contains a symlink: "+rel)
-		}
-		if entry.IsDir() && (rel == ".git" || rel == ".orchard" || rel == ".build" || rel == "xtool") {
-			return filepath.SkipDir
-		}
-		if entry.IsDir() {
+	}
+	err := walkRegularFilesWithin(ctx, project, map[string]bool{".git": true, ".orchard": true, ".build": true, "xtool": true}, func(relative string, file *os.File) error {
+		if selectedIPA != "" && filepath.Clean(relative) == selectedIPA {
 			return nil
 		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if !info.Mode().IsRegular() {
-			return Errorf("invalid_project", "project contains a nonregular file: "+rel)
-		}
-		_, _ = io.WriteString(h, filepath.ToSlash(rel)+"\x00")
-		file, err := openRegularWithin(project, path, os.O_RDONLY, 0)
-		if err != nil {
-			return err
-		}
-		copyErr := hashBounded(ctx, h, file, maxFingerprintFileBytes, &projectBytes, maxFingerprintTotalBytes)
-		closeErr := file.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		return closeErr
+		_, _ = io.WriteString(h, filepath.ToSlash(relative)+"\x00")
+		return hashBounded(ctx, h, file, maxFingerprintFileBytes, &projectBytes, maxFingerprintTotalBytes)
 	})
 	if err != nil {
 		return "", err
